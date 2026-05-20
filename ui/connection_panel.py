@@ -73,7 +73,9 @@ class ConnectionPanel(QWidget):
         self.setObjectName("ConnectionPanel")
         self.setFixedHeight(55)
         self.setStyleSheet(_PANEL_QSS)
-        self._is_connected = False
+        self._is_connected   = False
+        self._account_name   = ""
+        self._compact_layout = False
         self._build_ui()
         self.set_state_not_found()
 
@@ -92,21 +94,23 @@ class ConnectionPanel(QWidget):
         self._status_label.setMinimumWidth(160)
         layout.addWidget(self._status_label)
 
-        # Divider hidden in compact mode along with the stats block
-        self._div_before_stats = _make_divider()
-        layout.addWidget(self._div_before_stats)
+        # Divider — always visible (separates status from stats)
+        layout.addWidget(_make_divider())
 
-        # Balance + Equity block — hidden in compact mode
-        self._stats_widget = QWidget()
-        self._stats_widget.setStyleSheet("background: transparent;")
-        stats_layout = QHBoxLayout(self._stats_widget)
-        stats_layout.setContentsMargins(0, 0, 0, 0)
-        stats_layout.setSpacing(10)
-        stats_layout.addLayout(self._make_stat_block("BALANCE", "_balance_val"))
-        stats_layout.addWidget(_make_divider())
-        stats_layout.addLayout(self._make_stat_block("EQUITY", "_equity_val"))
-        stats_layout.addWidget(_make_divider())
-        layout.addWidget(self._stats_widget)
+        # Balance block — hidden in compact mode (includes its trailing divider)
+        self._balance_widget = QWidget()
+        self._balance_widget.setStyleSheet("background: transparent;")
+        bal_layout = QHBoxLayout(self._balance_widget)
+        bal_layout.setContentsMargins(0, 0, 0, 0)
+        bal_layout.setSpacing(10)
+        bal_layout.addLayout(self._make_stat_block("BALANCE", "_balance_val"))
+        bal_layout.addWidget(_make_divider())
+        layout.addWidget(self._balance_widget)
+
+        # Equity — always visible in both normal and compact modes
+        layout.addLayout(self._make_stat_block("EQUITY", "_equity_val"))
+
+        layout.addWidget(_make_divider())
 
         # P/L — always visible
         layout.addLayout(self._make_stat_block("P / L", "_pl_val"))
@@ -160,8 +164,18 @@ class ConnectionPanel(QWidget):
         self._status_label.setText(text)
         self._status_label.setStyleSheet(f"color: {color};")
 
+    def _refresh_status_label(self) -> None:
+        if not self._is_connected:
+            return
+        # Hide account name in compact mode
+        if self._compact_layout or not self._account_name:
+            self._set_status("● Connected", COLORS["green"])
+        else:
+            self._set_status(f"● Connected  [{self._account_name}]", COLORS["green"])
+
     def set_state_not_found(self) -> None:
-        self._is_connected = False
+        self._is_connected  = False
+        self._account_name  = ""
         self._set_status("● MT5 Not Found", COLORS["red"])
         self._toggle_btn.setText("Connect")
         self._toggle_btn.setEnabled(False)
@@ -169,7 +183,8 @@ class ConnectionPanel(QWidget):
         self._clear_stats()
 
     def set_state_detected(self) -> None:
-        self._is_connected = False
+        self._is_connected  = False
+        self._account_name  = ""
         self._set_status("● MT5 Running", COLORS["amber"])
         self._toggle_btn.setText("Connect")
         self._toggle_btn.setEnabled(True)
@@ -178,12 +193,11 @@ class ConnectionPanel(QWidget):
 
     def set_state_connected(self, account_info: dict | None = None) -> None:
         self._is_connected = True
-        label = "● MT5 Connected"
+        self._account_name = ""
         if account_info:
             name = account_info.get("name") or str(account_info.get("login", ""))
-            if name:
-                label = f"● Connected  [{name}]"
-        self._set_status(label, COLORS["green"])
+            self._account_name = name
+        self._refresh_status_label()
         self._toggle_btn.setText("Disconnect")
         self._toggle_btn.setEnabled(True)
         self._toggle_btn.setStyleSheet(
@@ -219,7 +233,8 @@ class ConnectionPanel(QWidget):
     # ------------------------------------------------------------------
 
     def set_compact_layout(self, compact: bool) -> None:
-        self._stats_widget.setVisible(not compact)
-        self._div_before_stats.setVisible(not compact)
+        self._compact_layout = compact
+        self._balance_widget.setVisible(not compact)
         self.setFixedHeight(38 if compact else 55)
         self._mode_btn.setText("Normal" if compact else "Compact")
+        self._refresh_status_label()

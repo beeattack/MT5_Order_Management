@@ -336,7 +336,7 @@ class MainWindow(QMainWindow):
             # Width = visible columns + Actions + chrome (panel margins 16 + tab borders 2)
             # No scrollbar width — scrollbar is hidden in compact mode
             compact_w = self._orders_panel.COMPACT_CONTENT_WIDTH + 18
-            self.setFixedSize(compact_w, 340)
+            self.setFixedSize(compact_w, 289)
         else:
             self.setWindowFlags(
                 Qt.WindowType.Window |
