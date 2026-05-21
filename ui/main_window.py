@@ -333,10 +333,12 @@ class MainWindow(QMainWindow):
                 Qt.WindowType.WindowStaysOnTopHint
             )
             self.show()
-            # Width = visible columns + Actions + chrome (panel margins 16 + tab borders 2)
-            # No scrollbar width — scrollbar is hidden in compact mode
+            # Lock width exactly to content, allow height resize only
             compact_w = self._orders_panel.COMPACT_CONTENT_WIDTH + 18
-            self.setFixedSize(compact_w, 289)
+            self.setFixedWidth(compact_w)
+            self.setMinimumHeight(220)
+            self.setMaximumHeight(16777215)
+            self.resize(compact_w, 289)
         else:
             self.setWindowFlags(
                 Qt.WindowType.Window |
@@ -346,7 +348,7 @@ class MainWindow(QMainWindow):
                 Qt.WindowType.WindowMinMaxButtonsHint
             )
             self.show()
-            # Restore free resizing
+            # Restore full free resizing in normal mode
             self.setMinimumSize(900, 500)
             self.setMaximumSize(16777215, 16777215)
             self.resize(1200, 700)
