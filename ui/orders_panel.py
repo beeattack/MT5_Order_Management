@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
 from models.order import Order
+from utils.timezone_manager import format_dt, DEFAULT_TZ
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -25,10 +26,10 @@ COLORS = {
 }
 
 _COLUMNS = ["Ticket", "Symbol", "Type", "Volume",
-            "Open Price", "Current", "SL", "TP", "Profit", "Actions"]
+            "Open Price", "Current", "SL", "TP", "Profit", "Open Time", "Actions"]
 
-# Columns hidden in compact mode (by index): Ticket, Open Price, SL, TP
-_COMPACT_HIDDEN_COLS = frozenset({0, 4, 6, 7})
+# Columns hidden in compact mode (by index): Ticket, Open Price, SL, TP, Open Time
+_COMPACT_HIDDEN_COLS = frozenset({0, 4, 6, 7, 9})
 
 # Fixed widths used in compact mode for visible columns
 _COMPACT_COL_WIDTHS = {
@@ -106,7 +107,13 @@ class OrdersPanel(QWidget):
         super().__init__(parent)
         self.setStyleSheet(_PANEL_QSS)
         self._compact = False
+        self._tz_name = DEFAULT_TZ
+        self._last_orders: list[Order] = []
         self._build_ui()
+
+    def set_timezone(self, tz_name: str) -> None:
+        self._tz_name = tz_name
+        self.update_orders(self._last_orders)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -170,6 +177,7 @@ class OrdersPanel(QWidget):
     # ------------------------------------------------------------------
 
     def update_orders(self, orders: list[Order]) -> None:
+        self._last_orders = orders
         self._table.setRowCount(0)
         self._table.setRowCount(len(orders))
 
@@ -199,8 +207,11 @@ class OrdersPanel(QWidget):
             profit_item.setForeground(profit_color)
             self._table.setItem(row, 8, profit_item)
 
+            # Open Time — converted to selected timezone
+            self._set_item(row, 9, format_dt(order.open_time, self._tz_name))
+
             # Actions widget
-            self._table.setCellWidget(row, 9, self._make_action_widget(order.ticket, order.volume))
+            self._table.setCellWidget(row, 10, self._make_action_widget(order.ticket, order.volume))
 
         self._close_all_btn.setEnabled(len(orders) > 0)
 
@@ -215,7 +226,7 @@ class OrdersPanel(QWidget):
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._table.setItem(row, col, item)
 
-    _ACTIONS_COL = len(_COLUMNS) - 1
+    _ACTIONS_COL = len(_COLUMNS) - 1  # index 10
     _ACTIONS_COMPACT_WIDTH = 235  # fixed width just enough for all 4 buttons at normal padding
 
     # Total compact content width (visible columns + Actions); caller adds chrome offset
@@ -254,7 +265,7 @@ class OrdersPanel(QWidget):
         self._rebuild_action_widgets()
 
     def _rebuild_action_widgets(self) -> None:
-        actions_col = len(_COLUMNS) - 1
+        actions_col = self._ACTIONS_COL
         for row in range(self._table.rowCount()):
             ticket_item = self._table.item(row, 0)
             volume_item = self._table.item(row, 3)

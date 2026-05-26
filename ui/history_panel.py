@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QDate, QDateTime, QTime, Signal
 from PySide6.QtGui import QFont, QColor, QTextCharFormat
 
 from models.history_entry import HistoryEntry
+from utils.timezone_manager import format_dt, localize_naive, convert_dt, DEFAULT_TZ
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -176,7 +177,16 @@ class HistoryPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(_PANEL_QSS)
+        self._tz_name = DEFAULT_TZ
+        self._last_entries: list[HistoryEntry] = []
+        self._last_summary: dict = {}
+        self._last_win_rate: float = 0.0
         self._build_ui()
+
+    def set_timezone(self, tz_name: str) -> None:
+        self._tz_name = tz_name
+        if self._last_entries:
+            self.update_history(self._last_entries, self._last_summary, self._last_win_rate)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -308,21 +318,27 @@ class HistoryPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_today_clicked(self) -> None:
-        today = QDate.currentDate()
+        from datetime import datetime, timezone as _tz
+        now_local = convert_dt(datetime.now(_tz.utc), self._tz_name)
+        today = QDate(now_local.year, now_local.month, now_local.day)
         self._from_dt.setDateTime(QDateTime(today, QTime(0, 0, 0)))
         self._to_dt.setDateTime(QDateTime(today, QTime(23, 59, 59)))
         self._on_filter_clicked()
 
     def clear(self) -> None:
         self._table.setRowCount(0)
+        self._last_entries = []
         self._win_rate_label.setText("Win Rate: —")
         self._win_rate_label.setStyleSheet("")
         self._summary_label.setText("Total: 0 | Wins: 0 | Losses: 0 | Net P/L: $0.00")
 
     def _on_filter_clicked(self) -> None:
-        from_qdt = self._from_dt.dateTime().toPython()
-        to_qdt   = self._to_dt.dateTime().toPython()
-        self.filter_requested.emit(from_qdt, to_qdt)
+        from_naive = self._from_dt.dateTime().toPython()
+        to_naive   = self._to_dt.dateTime().toPython()
+        # Localize picker values to the selected timezone so MT5 query uses correct UTC range
+        from_aware = localize_naive(from_naive, self._tz_name)
+        to_aware   = localize_naive(to_naive,   self._tz_name)
+        self.filter_requested.emit(from_aware, to_aware)
 
     # ------------------------------------------------------------------
     # Public update method
@@ -334,6 +350,10 @@ class HistoryPanel(QWidget):
         summary: dict,
         win_rate: float,
     ) -> None:
+        self._last_entries  = entries
+        self._last_summary  = summary
+        self._last_win_rate = win_rate
+
         # Win rate label
         wr_text  = f"Win Rate: {win_rate:.1f}%"
         wr_color = COLORS["green"] if win_rate >= 50 else COLORS["red"]
@@ -368,8 +388,8 @@ class HistoryPanel(QWidget):
             profit_item.setForeground(profit_color)
             self._table.setItem(row, 6, profit_item)
 
-            self._set_item(row, 7, entry.open_time.strftime("%Y-%m-%d %H:%M"))
-            self._set_item(row, 8, entry.close_time.strftime("%Y-%m-%d %H:%M"))
+            self._set_item(row, 7, format_dt(entry.open_time,  self._tz_name))
+            self._set_item(row, 8, format_dt(entry.close_time, self._tz_name))
 
         self._table.resizeColumnToContents(0)
 

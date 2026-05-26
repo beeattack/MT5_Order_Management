@@ -130,6 +130,31 @@ QMessageBox {{
     background-color: {COLORS['panel']};
     color: {COLORS['text']};
 }}
+QComboBox {{
+    background-color: {COLORS['panel']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['accent']};
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+}}
+QComboBox:hover {{
+    border: 1px solid {COLORS['btn_hover']};
+}}
+QComboBox::drop-down {{
+    border: none;
+    background-color: {COLORS['accent']};
+    width: 16px;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {COLORS['panel']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['accent']};
+    selection-background-color: {COLORS['accent']};
+    selection-color: {COLORS['text']};
+}}
 """
 
 
@@ -168,6 +193,7 @@ class MainWindow(QMainWindow):
         self._conn_panel.connect_requested.connect(self._on_connect)
         self._conn_panel.disconnect_requested.connect(self._on_disconnect)
         self._conn_panel.display_mode_toggled.connect(self._toggle_display_mode)
+        self._conn_panel.timezone_changed.connect(self._on_timezone_changed)
         layout.addWidget(self._conn_panel)
 
         # Tab widget
@@ -263,6 +289,14 @@ class MainWindow(QMainWindow):
                 f"Could not close position #{ticket}:\n{err}",
             )
         self._refresh_orders()
+
+    # ------------------------------------------------------------------
+    # Slot — timezone change
+    # ------------------------------------------------------------------
+
+    def _on_timezone_changed(self, tz_name: str) -> None:
+        self._orders_panel.set_timezone(tz_name)
+        self._history_panel.set_timezone(tz_name)
 
     # ------------------------------------------------------------------
     # Slot — history filter

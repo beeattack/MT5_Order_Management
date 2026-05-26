@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from models.history_entry import HistoryEntry
 
@@ -34,7 +34,7 @@ class HistoryManager:
             # DEAL_TYPE_SELL closes a BUY position; DEAL_TYPE_BUY closes a SELL position
             order_type = "BUY" if deal.type == mt5.DEAL_TYPE_SELL else "SELL"
 
-            close_time = datetime.fromtimestamp(deal.time)
+            close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc)
 
             # Try to resolve open_time and open_price from the originating order
             open_time = close_time
@@ -42,7 +42,7 @@ class HistoryManager:
             if deal.order:
                 orig_orders = mt5.history_orders_get(ticket=deal.order)
                 if orig_orders:
-                    open_time = datetime.fromtimestamp(orig_orders[0].time_setup)
+                    open_time = datetime.fromtimestamp(orig_orders[0].time_setup, tz=timezone.utc)
                     open_price = orig_orders[0].price_open
 
             entries.append(HistoryEntry(

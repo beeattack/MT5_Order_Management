@@ -1,16 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 block_cipher = None
 
 mt5_datas, mt5_binaries, mt5_hiddenimports = collect_all('MetaTrader5')
 np_datas, np_binaries, np_hiddenimports = collect_all('numpy')
+tz_datas = collect_data_files('tzdata', include_py_files=False)
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=mt5_binaries + np_binaries,
-    datas=mt5_datas + np_datas + [('app_icon.ico', '.')],
+    datas=mt5_datas + np_datas + tz_datas + [('app_icon.ico', '.')],
     hiddenimports=[
         'PySide6.QtCore',
         'PySide6.QtGui',
@@ -18,6 +19,8 @@ a = Analysis(
         'psutil',
         'numpy._core.multiarray',
         'numpy._core._multiarray_umath',
+        'zoneinfo',
+        'tzdata',
     ] + mt5_hiddenimports + np_hiddenimports,
     hookspath=[],
     hooksconfig={},

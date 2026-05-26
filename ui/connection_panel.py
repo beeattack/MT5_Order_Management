@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QPushButton, QFrame
+    QWidget, QHBoxLayout, QLabel, QPushButton, QFrame, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
+
+from utils.timezone_manager import TIMEZONE_OPTIONS, DEFAULT_TZ
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -50,6 +52,31 @@ QPushButton:disabled {{
     background-color: {COLORS['accent']};
     color: {COLORS['subtext']};
 }}
+QComboBox {{
+    background-color: {COLORS['bg']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['accent']};
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+}}
+QComboBox:hover {{
+    border: 1px solid {COLORS['btn_hover']};
+}}
+QComboBox::drop-down {{
+    border: none;
+    background-color: {COLORS['accent']};
+    width: 16px;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {COLORS['panel']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['accent']};
+    selection-background-color: {COLORS['accent']};
+    selection-color: {COLORS['text']};
+}}
 """
 
 _DIVIDER_QSS = f"background-color: {COLORS['accent']};"
@@ -67,6 +94,7 @@ class ConnectionPanel(QWidget):
     connect_requested    = Signal()
     disconnect_requested = Signal()
     display_mode_toggled = Signal()
+    timezone_changed     = Signal(str)   # emits IANA timezone name
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -117,6 +145,26 @@ class ConnectionPanel(QWidget):
 
         layout.addStretch()
 
+        # Timezone selector — hidden in compact mode
+        self._tz_widget = QWidget()
+        self._tz_widget.setStyleSheet("background: transparent;")
+        tz_layout = QHBoxLayout(self._tz_widget)
+        tz_layout.setContentsMargins(0, 0, 0, 0)
+        tz_layout.setSpacing(4)
+
+        tz_lbl = QLabel("TZ:")
+        tz_lbl.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 11px;")
+        tz_layout.addWidget(tz_lbl)
+
+        self._tz_combo = QComboBox()
+        self._tz_combo.setFixedWidth(185)
+        for label, _ in TIMEZONE_OPTIONS:
+            self._tz_combo.addItem(label)
+        self._tz_combo.currentIndexChanged.connect(self._on_tz_changed)
+        tz_layout.addWidget(self._tz_combo)
+
+        layout.addWidget(self._tz_widget)
+
         # Single connect/disconnect toggle button
         self._toggle_btn = QPushButton("Connect")
         self._toggle_btn.setFixedWidth(105)
@@ -147,7 +195,7 @@ class ConnectionPanel(QWidget):
         return block
 
     # ------------------------------------------------------------------
-    # Internal slot
+    # Internal slots
     # ------------------------------------------------------------------
 
     def _on_toggle_connection(self) -> None:
@@ -155,6 +203,13 @@ class ConnectionPanel(QWidget):
             self.disconnect_requested.emit()
         else:
             self.connect_requested.emit()
+
+    def _on_tz_changed(self, index: int) -> None:
+        _, iana = TIMEZONE_OPTIONS[index]
+        self.timezone_changed.emit(iana)
+
+    def selected_tz(self) -> str:
+        return TIMEZONE_OPTIONS[self._tz_combo.currentIndex()][1]
 
     # ------------------------------------------------------------------
     # State helpers (called from MainWindow)
@@ -235,6 +290,7 @@ class ConnectionPanel(QWidget):
     def set_compact_layout(self, compact: bool) -> None:
         self._compact_layout = compact
         self._balance_widget.setVisible(not compact)
+        self._tz_widget.setVisible(not compact)
         self.setFixedHeight(38 if compact else 55)
         self._mode_btn.setText("Normal" if compact else "Compact")
         self._refresh_status_label()

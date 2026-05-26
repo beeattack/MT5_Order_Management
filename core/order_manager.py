@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from models.order import Order
 
@@ -42,7 +42,7 @@ class OrderManager:
                 sl=pos.sl,
                 tp=pos.tp,
                 profit=pos.profit,
-                open_time=datetime.fromtimestamp(pos.time),
+                open_time=datetime.fromtimestamp(pos.time, tz=timezone.utc),
             ))
 
         return orders
