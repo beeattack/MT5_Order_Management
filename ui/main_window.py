@@ -222,7 +222,7 @@ class MainWindow(QMainWindow):
         self._detection_timer.start()
 
         self._orders_timer = QTimer(self)
-        self._orders_timer.setInterval(1000)
+        self._orders_timer.setInterval(100)
         self._orders_timer.timeout.connect(self._refresh_orders)
 
     # ------------------------------------------------------------------
