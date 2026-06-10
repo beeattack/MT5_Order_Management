@@ -135,13 +135,16 @@ class ConnectionPanel(QWidget):
         bal_layout.addWidget(_make_divider())
         layout.addWidget(self._balance_widget)
 
-        # Equity — always visible in both normal and compact modes
-        layout.addLayout(self._make_stat_block("EQUITY", "_equity_val"))
-
-        layout.addWidget(_make_divider())
-
-        # P/L — always visible
-        layout.addLayout(self._make_stat_block("P / L", "_pl_val"))
+        # Equity + P/L block — hidden in compact mode (shown in orders panel header instead)
+        self._equity_pl_widget = QWidget()
+        self._equity_pl_widget.setStyleSheet("background: transparent;")
+        ep_layout = QHBoxLayout(self._equity_pl_widget)
+        ep_layout.setContentsMargins(0, 0, 0, 0)
+        ep_layout.setSpacing(10)
+        ep_layout.addLayout(self._make_stat_block("EQUITY", "_equity_val"))
+        ep_layout.addWidget(_make_divider())
+        ep_layout.addLayout(self._make_stat_block("P / L", "_pl_val"))
+        layout.addWidget(self._equity_pl_widget)
 
         layout.addStretch()
 
@@ -290,6 +293,7 @@ class ConnectionPanel(QWidget):
     def set_compact_layout(self, compact: bool) -> None:
         self._compact_layout = compact
         self._balance_widget.setVisible(not compact)
+        self._equity_pl_widget.setVisible(not compact)
         self._tz_widget.setVisible(not compact)
         self.setFixedHeight(38 if compact else 55)
         self._mode_btn.setText("Normal" if compact else "Compact")

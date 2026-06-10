@@ -28,15 +28,14 @@ COLORS = {
 _COLUMNS = ["Ticket", "Symbol", "Type", "Volume",
             "Open Price", "Current", "SL", "TP", "Profit", "Open Time", "Actions"]
 
-# Columns hidden in compact mode (by index): Ticket, Open Price, SL, TP, Open Time
-_COMPACT_HIDDEN_COLS = frozenset({0, 4, 6, 7, 9})
+# Columns hidden in compact mode (by index): Ticket, Open Price, Current, SL, TP, Open Time
+_COMPACT_HIDDEN_COLS = frozenset({0, 4, 5, 6, 7, 9})
 
 # Fixed widths used in compact mode for visible columns
 _COMPACT_COL_WIDTHS = {
     "Symbol":  82,
     "Type":    56,
     "Volume":  68,
-    "Current": 95,
     "Profit":  95,
 }
 
@@ -134,6 +133,24 @@ class OrdersPanel(QWidget):
         self._title_label = QLabel("Active Orders")
         self._title_label.setObjectName("panelTitle")
         header_row.addWidget(self._title_label)
+
+        # Compact-mode equity / P/L labels (hidden in normal mode)
+        self._compact_equity_lbl = QLabel("EQUITY  —")
+        self._compact_equity_lbl.setStyleSheet(
+            f"color: {COLORS['text']}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; padding: 0 6px;"
+        )
+        self._compact_equity_lbl.setVisible(False)
+        header_row.addWidget(self._compact_equity_lbl)
+
+        self._compact_pl_lbl = QLabel("P/L  —")
+        self._compact_pl_lbl.setStyleSheet(
+            f"color: {COLORS['text']}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; padding: 0 6px;"
+        )
+        self._compact_pl_lbl.setVisible(False)
+        header_row.addWidget(self._compact_pl_lbl)
+
         header_row.addStretch()
 
         self._close_all_btn = QPushButton("⬛  Close All Orders")
@@ -178,6 +195,29 @@ class OrdersPanel(QWidget):
 
     def update_orders(self, orders: list[Order]) -> None:
         self._last_orders = orders
+
+        new_tickets = [str(o.ticket) for o in orders]
+        current_tickets = [
+            self._table.item(r, 0).text() if self._table.item(r, 0) else ""
+            for r in range(self._table.rowCount())
+        ]
+
+        if new_tickets == current_tickets:
+            # Same order list — update only the live columns; leave action widgets intact
+            for row, order in enumerate(orders):
+                self._set_item(row, 5, f"{order.current_price:,.2f}")
+                profit_sign = "+" if order.profit >= 0 else ""
+                profit_item = QTableWidgetItem(f"{profit_sign}{order.profit:,.2f}")
+                profit_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                profit_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                profit_item.setForeground(
+                    QColor(COLORS["green"] if order.profit >= 0 else COLORS["red"])
+                )
+                self._table.setItem(row, 8, profit_item)
+            self._close_all_btn.setEnabled(bool(orders))
+            return
+
+        # Structural change (orders added/removed/reordered) — full rebuild
         self._table.setRowCount(0)
         self._table.setRowCount(len(orders))
 
@@ -185,7 +225,6 @@ class OrdersPanel(QWidget):
             self._set_item(row, 0, str(order.ticket))
             self._set_item(row, 1, order.symbol)
 
-            # Type cell — coloured text
             type_item = QTableWidgetItem(order.order_type)
             type_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             type_color = QColor(COLORS["green"]) if order.order_type == "BUY" else QColor(COLORS["red"])
@@ -198,7 +237,6 @@ class OrdersPanel(QWidget):
             self._set_item(row, 6, f"{order.sl:,.2f}" if order.sl else "—")
             self._set_item(row, 7, f"{order.tp:,.2f}" if order.tp else "—")
 
-            # Profit cell — coloured with sign
             profit_sign = "+" if order.profit >= 0 else ""
             profit_item = QTableWidgetItem(f"{profit_sign}{order.profit:,.2f}")
             profit_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -207,13 +245,10 @@ class OrdersPanel(QWidget):
             profit_item.setForeground(profit_color)
             self._table.setItem(row, 8, profit_item)
 
-            # Open Time — converted to selected timezone
             self._set_item(row, 9, format_dt(order.open_time, self._tz_name))
-
-            # Actions widget
             self._table.setCellWidget(row, 10, self._make_action_widget(order.ticket, order.volume))
 
-        self._close_all_btn.setEnabled(len(orders) > 0)
+        self._close_all_btn.setEnabled(bool(orders))
 
     # ------------------------------------------------------------------
     # Helpers
@@ -234,8 +269,9 @@ class OrdersPanel(QWidget):
 
     def set_compact_mode(self, compact: bool) -> None:
         self._compact = compact
-        # In compact mode hide only the title; keep Close All button visible
         self._title_label.setVisible(not compact)
+        self._compact_equity_lbl.setVisible(compact)
+        self._compact_pl_lbl.setVisible(compact)
         hh = self._table.horizontalHeader()
 
         for col_idx, col_name in enumerate(_COLUMNS):
@@ -263,6 +299,16 @@ class OrdersPanel(QWidget):
             self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         self._rebuild_action_widgets()
+
+    def update_compact_stats(self, equity: float, pl: float) -> None:
+        self._compact_equity_lbl.setText(f"EQUITY  ${equity:,.2f}")
+        sign = "+" if pl >= 0 else ""
+        color = COLORS["green"] if pl >= 0 else COLORS["red"]
+        self._compact_pl_lbl.setText(f"P/L  {sign}${pl:,.2f}")
+        self._compact_pl_lbl.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; padding: 0 6px;"
+        )
 
     def _rebuild_action_widgets(self) -> None:
         actions_col = self._ACTIONS_COL

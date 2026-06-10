@@ -50,9 +50,7 @@ QLabel#winRateLabel {{
 QLabel#summaryLabel {{
     color: {COLORS['subtext']};
     font-size: 12px;
-    padding: 4px 6px;
-    background-color: {COLORS['panel']};
-    border-top: 1px solid {COLORS['accent']};
+    padding: 0px 12px 2px 12px;
 }}
 QTableWidget {{
     background-color: {COLORS['panel']};
@@ -214,6 +212,12 @@ class HistoryPanel(QWidget):
 
         layout.addLayout(top_row)
 
+        # --- Stats row: total / wins / losses / net P/L ---
+        self._summary_label = QLabel("Total: 0 | Wins: 0 | Losses: 0 | Net P/L: $0.00")
+        self._summary_label.setObjectName("summaryLabel")
+        self._summary_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._summary_label)
+
         # --- Filter row ---
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
@@ -291,13 +295,6 @@ class HistoryPanel(QWidget):
                 self._table.setColumnWidth(col_idx, width)
 
         layout.addWidget(self._table)
-
-        # --- Summary bar ---
-        self._summary_label = QLabel("Total: 0 | Wins: 0 | Losses: 0 | Net P/L: $0.00")
-        self._summary_label.setObjectName("summaryLabel")
-        self._summary_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._summary_label.setFixedHeight(30)
-        layout.addWidget(self._summary_label)
 
     # ------------------------------------------------------------------
     # Calendar setup

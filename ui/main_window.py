@@ -322,11 +322,15 @@ class MainWindow(QMainWindow):
         self._orders_panel.update_orders(orders)
         account_info = self.connector.get_account_info()
         if account_info:
+            equity = account_info.get("equity", 0.0)
+            profit = account_info.get("profit", 0.0)
             self._conn_panel.update_account_stats(
                 account_info.get("balance", 0.0),
-                account_info.get("equity", 0.0),
-                account_info.get("profit", 0.0),
+                equity,
+                profit,
             )
+            if self._compact_mode:
+                self._orders_panel.update_compact_stats(equity, profit)
 
     def _check_mt5_status(self) -> None:
         if self._connected:
@@ -370,9 +374,9 @@ class MainWindow(QMainWindow):
             # Lock width exactly to content, allow height resize only
             compact_w = self._orders_panel.COMPACT_CONTENT_WIDTH + 18
             self.setFixedWidth(compact_w)
-            self.setMinimumHeight(220)
+            self.setMinimumHeight(198)
             self.setMaximumHeight(16777215)
-            self.resize(compact_w, 289)
+            self.resize(compact_w, 260)
         else:
             self.setWindowFlags(
                 Qt.WindowType.Window |
