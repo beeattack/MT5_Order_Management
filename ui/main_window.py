@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
-    QTabWidget, QMessageBox, QApplication,
+    QTabWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_close_all_orders(self) -> None:
-        count = self._orders_panel._table.rowCount()
+        count = self._orders_panel.order_count()
         reply = QMessageBox.question(
             self,
             "Close All Orders",

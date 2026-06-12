@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -315,8 +315,7 @@ class HistoryPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_today_clicked(self) -> None:
-        from datetime import datetime, timezone as _tz
-        now_local = convert_dt(datetime.now(_tz.utc), self._tz_name)
+        now_local = convert_dt(datetime.now(timezone.utc), self._tz_name)
         today = QDate(now_local.year, now_local.month, now_local.day)
         self._from_dt.setDateTime(QDateTime(today, QTime(0, 0, 0)))
         self._to_dt.setDateTime(QDateTime(today, QTime(23, 59, 59)))
@@ -374,8 +373,8 @@ class HistoryPanel(QWidget):
             self._table.setItem(row, 2, type_item)
 
             self._set_item(row, 3, f"{entry.volume:.2f}", align_right=True)
-            self._set_item(row, 4, f"{entry.open_price:,.2f}", align_right=True)
-            self._set_item(row, 5, f"{entry.close_price:,.2f}", align_right=True)
+            self._set_item(row, 4, f"{entry.open_price:,.{entry.digits}f}", align_right=True)
+            self._set_item(row, 5, f"{entry.close_price:,.{entry.digits}f}", align_right=True)
 
             profit_sign  = "+" if entry.profit >= 0 else ""
             profit_item  = QTableWidgetItem(f"{profit_sign}{entry.profit:,.2f}")

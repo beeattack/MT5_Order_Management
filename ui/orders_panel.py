@@ -114,6 +114,9 @@ class OrdersPanel(QWidget):
         self._tz_name = tz_name
         self.update_orders(self._last_orders)
 
+    def order_count(self) -> int:
+        return len(self._last_orders)
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -205,7 +208,7 @@ class OrdersPanel(QWidget):
         if new_tickets == current_tickets:
             # Same order list — update only the live columns; leave action widgets intact
             for row, order in enumerate(orders):
-                self._set_item(row, 5, f"{order.current_price:,.2f}")
+                self._set_item(row, 5, f"{order.current_price:,.{order.digits}f}")
                 profit_sign = "+" if order.profit >= 0 else ""
                 profit_item = QTableWidgetItem(f"{profit_sign}{order.profit:,.2f}")
                 profit_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -231,11 +234,12 @@ class OrdersPanel(QWidget):
             type_item.setForeground(type_color)
             self._table.setItem(row, 2, type_item)
 
+            d = order.digits
             self._set_item(row, 3, f"{order.volume:.2f}")
-            self._set_item(row, 4, f"{order.open_price:,.2f}")
-            self._set_item(row, 5, f"{order.current_price:,.2f}")
-            self._set_item(row, 6, f"{order.sl:,.2f}" if order.sl else "—")
-            self._set_item(row, 7, f"{order.tp:,.2f}" if order.tp else "—")
+            self._set_item(row, 4, f"{order.open_price:,.{d}f}")
+            self._set_item(row, 5, f"{order.current_price:,.{d}f}")
+            self._set_item(row, 6, f"{order.sl:,.{d}f}" if order.sl else "—")
+            self._set_item(row, 7, f"{order.tp:,.{d}f}" if order.tp else "—")
 
             profit_sign = "+" if order.profit >= 0 else ""
             profit_item = QTableWidgetItem(f"{profit_sign}{order.profit:,.2f}")

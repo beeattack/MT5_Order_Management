@@ -13,4 +13,5 @@ class HistoryEntry:
     profit: float
     open_time: datetime
     close_time: datetime
-    is_win: bool        # profit > 0
+    is_win: bool        # profit > 0 (net of commission/swap/fee)
+    digits: int = 2     # price decimal places from symbol_info

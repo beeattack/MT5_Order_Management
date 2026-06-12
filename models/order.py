@@ -14,3 +14,4 @@ class Order:
     tp: float
     profit: float
     open_time: datetime
+    digits: int = 2     # price decimal places from symbol_info

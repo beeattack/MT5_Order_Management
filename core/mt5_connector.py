@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import psutil
 
+from core import server_clock
+
 _MT5_IMPORT_ERROR = ""
 try:
     import MetaTrader5 as mt5
@@ -36,6 +38,8 @@ class MT5Connector:
         ok = mt5.initialize()
         if ok:
             self._connected = True
+            server_clock.reset()
+            server_clock.calibrate()
             return True, ""
 
         code, description = mt5.last_error()
