@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
 from models.order import Order
+from core.constants import source_icon, source_label
 from utils.timezone_manager import format_dt, DEFAULT_TZ
 
 COLORS = {
@@ -33,7 +34,7 @@ _COMPACT_HIDDEN_COLS = frozenset({0, 4, 5, 6, 7, 9})
 
 # Fixed widths used in compact mode for visible columns
 _COMPACT_COL_WIDTHS = {
-    "Symbol":  82,
+    "Symbol":  104,   # wider to fit the source icon prefix
     "Type":    56,
     "Volume":  68,
     "Profit":  95,
@@ -137,6 +138,12 @@ class OrdersPanel(QWidget):
         self._title_label.setObjectName("panelTitle")
         header_row.addWidget(self._title_label)
 
+        self._legend_label = QLabel(f"{source_icon(True)} Auto   {source_icon(False)} Manual")
+        self._legend_label.setStyleSheet(
+            f"color: {COLORS['subtext']}; font-size: 11px; padding: 0 8px;"
+        )
+        header_row.addWidget(self._legend_label)
+
         # Compact-mode equity / P/L labels (hidden in normal mode)
         self._compact_equity_lbl = QLabel("EQUITY  —")
         self._compact_equity_lbl.setStyleSheet(
@@ -226,7 +233,11 @@ class OrdersPanel(QWidget):
 
         for row, order in enumerate(orders):
             self._set_item(row, 0, str(order.ticket))
-            self._set_item(row, 1, order.symbol)
+
+            sym_item = QTableWidgetItem(f"{source_icon(order.is_auto)}  {order.symbol}")
+            sym_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            sym_item.setToolTip(source_label(order.is_auto))
+            self._table.setItem(row, 1, sym_item)
 
             type_item = QTableWidgetItem(order.order_type)
             type_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -274,6 +285,7 @@ class OrdersPanel(QWidget):
     def set_compact_mode(self, compact: bool) -> None:
         self._compact = compact
         self._title_label.setVisible(not compact)
+        self._legend_label.setVisible(not compact)
         self._compact_equity_lbl.setVisible(compact)
         self._compact_pl_lbl.setVisible(compact)
         hh = self._table.horizontalHeader()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 from core import server_clock
+from core.constants import AUTO_TRADE_MAGIC
 from models.order import Order
 
 try:
@@ -93,6 +94,7 @@ class OrderManager:
                 profit=pos.profit,
                 open_time=server_clock.server_ts_to_utc(pos.time),
                 digits=digits,
+                is_auto=(pos.magic == AUTO_TRADE_MAGIC),
             ))
 
         return orders

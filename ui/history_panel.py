@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QDate, QDateTime, QTime, Signal
 from PySide6.QtGui import QFont, QColor, QTextCharFormat
 
 from models.history_entry import HistoryEntry
+from core.constants import source_icon, source_label
 from utils.timezone_manager import format_dt, localize_naive, convert_dt, DEFAULT_TZ
 
 COLORS = {
@@ -364,7 +365,11 @@ class HistoryPanel(QWidget):
 
         for row, entry in enumerate(entries):
             self._set_item(row, 0, str(entry.ticket))
-            self._set_item(row, 1, entry.symbol)
+
+            sym_item = QTableWidgetItem(f"{source_icon(entry.is_auto)}  {entry.symbol}")
+            sym_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            sym_item.setToolTip(source_label(entry.is_auto))
+            self._table.setItem(row, 1, sym_item)
 
             type_item = QTableWidgetItem(entry.order_type)
             type_item.setFlags(Qt.ItemFlag.ItemIsEnabled)

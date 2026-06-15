@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 
 from core import server_clock
+from core.constants import AUTO_TRADE_MAGIC
 from core.risk_manager import RiskManager
 from core.strategy import EmaRsiPullbackStrategy
 from models.signal import PaperPosition, Signal
@@ -32,9 +33,6 @@ try:
 except ImportError:
     mt5 = None  # type: ignore[assignment]
     MT5_AVAILABLE = False
-
-# Tag for the bot's own positions so it never touches manually-opened trades
-AUTO_TRADE_MAGIC = 778899
 
 _TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400}
 _DEFAULT_BALANCE = 10_000.0

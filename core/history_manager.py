@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from core import server_clock
+from core.constants import AUTO_TRADE_MAGIC
 from models.history_entry import HistoryEntry
 
 try:
@@ -66,6 +67,9 @@ class HistoryManager:
             # deal isn't in `deals` — fetch that position's deals once.
             open_time = close_time
             open_price = deal.price
+            # The opening order carries the auto-trade magic; the closing deal
+            # may not, so classify from the entry deal when we have it.
+            entry_magic = deal.magic
             if deal.position_id:
                 ins = entry_deals.get(deal.position_id)
                 if ins is None:
@@ -76,6 +80,7 @@ class HistoryManager:
                     first_in = min(ins, key=lambda d: d.time)
                     open_time = server_clock.server_ts_to_utc(first_in.time)
                     open_price = first_in.price
+                    entry_magic = first_in.magic
 
             # Net result of this closing deal (commission/swap/fee included)
             net_profit = deal.profit + deal.commission + deal.swap + getattr(deal, "fee", 0.0)
@@ -92,6 +97,7 @@ class HistoryManager:
                 close_time=close_time,
                 is_win=net_profit > 0,
                 digits=self._symbol_digits(deal.symbol),
+                is_auto=(entry_magic == AUTO_TRADE_MAGIC),
             ))
 
         # Sort newest first

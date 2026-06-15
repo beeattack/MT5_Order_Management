@@ -15,3 +15,4 @@ class HistoryEntry:
     close_time: datetime
     is_win: bool        # profit > 0 (net of commission/swap/fee)
     digits: int = 2     # price decimal places from symbol_info
+    is_auto: bool = False   # opened by the auto-trader (magic == AUTO_TRADE_MAGIC)

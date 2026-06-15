@@ -15,3 +15,4 @@ class Order:
     profit: float
     open_time: datetime
     digits: int = 2     # price decimal places from symbol_info
+    is_auto: bool = False   # opened by the auto-trader (magic == AUTO_TRADE_MAGIC)
