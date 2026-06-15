@@ -177,3 +177,62 @@ class OrderManager:
             return False, f"Computed volume {volume:g} is below the symbol minimum {vol_min:g}"
 
         return self.close_order(ticket, volume)
+
+    def open_order(
+        self,
+        symbol: str,
+        direction: str,
+        volume: float,
+        sl_distance: float = 0.0,
+        tp_distance: float = 0.0,
+        magic: int = 0,
+        comment: str = "",
+    ) -> tuple[bool, str]:
+        """Open a market position. SL/TP are *distances* in price units,
+        applied relative to the current entry price (ask for BUY, bid for SELL)."""
+        if not MT5_AVAILABLE:
+            return False, "MetaTrader5 package is not installed"
+
+        info = self._symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return False, f"Could not get tick data for {symbol}"
+
+        volume = self._snap_volume(volume, info)
+        if volume <= 0:
+            return False, f"Volume {volume:g} is not tradable for {symbol}"
+
+        is_buy = direction == "BUY"
+        price = tick.ask if is_buy else tick.bid
+        digits = getattr(info, "digits", 5) if info else 5
+
+        sl = tp = 0.0
+        if sl_distance > 0:
+            sl = round(price - sl_distance if is_buy else price + sl_distance, digits)
+        if tp_distance > 0:
+            tp = round(price + tp_distance if is_buy else price - tp_distance, digits)
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL,
+            "price": price,
+            "sl": sl,
+            "tp": tp,
+            "deviation": 20,
+            "magic": magic,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": self._filling_mode(info),
+        }
+
+        result = mt5.order_send(request)
+        if result is None:
+            code, desc = mt5.last_error()
+            return False, f"order_send failed [{code}]: {desc}"
+
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            return True, ""
+
+        return False, f"[{result.retcode}] {result.comment}"

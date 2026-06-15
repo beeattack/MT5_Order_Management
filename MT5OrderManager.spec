@@ -11,7 +11,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=mt5_binaries + np_binaries,
-    datas=mt5_datas + np_datas + tz_datas + [('app_icon.ico', '.')],
+    datas=mt5_datas + np_datas + tz_datas + [('app_icon.ico', '.'), ('README.md', '.')],
     hiddenimports=[
         'PySide6.QtCore',
         'PySide6.QtGui',
