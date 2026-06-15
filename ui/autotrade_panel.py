@@ -116,7 +116,7 @@ class AutoTradePanel(QWidget):
         layout.setContentsMargins(10, 6, 10, 8)
         layout.setSpacing(6)
 
-        title = QLabel("Auto Trade — M1/M5 Scalper (EMA + RSI pullback)")
+        title = QLabel("Auto Trade — H1 Swing (EMA + RSI pullback)")
         title.setObjectName("panelTitle")
         layout.addWidget(title)
 
@@ -129,8 +129,8 @@ class AutoTradePanel(QWidget):
         self._symbol.setFixedWidth(110)
 
         self._timeframe = QComboBox()
-        self._timeframe.addItems(["M1", "M5"])
-        self._timeframe.setCurrentText("M5")
+        self._timeframe.addItems(["H1", "H4"])
+        self._timeframe.setCurrentText("H1")
         self._timeframe.setFixedWidth(80)
 
         self._mode = QComboBox()
@@ -142,7 +142,7 @@ class AutoTradePanel(QWidget):
         self._max_positions = self._spin(QSpinBox, 1, 20, 1, 1)
         self._daily_loss = self._spin(QDoubleSpinBox, 0.0, 50.0, 3.0, 0.5, suffix=" %")
         self._daily_profit = self._spin(QDoubleSpinBox, 0.0, 100.0, 5.0, 0.5, suffix=" %")
-        self._time_stop = self._spin(QSpinBox, 1, 200, 12, 1, suffix=" bars")
+        self._time_stop = self._spin(QSpinBox, 1, 500, 24, 1, suffix=" bars")
         self._max_spread = self._spin(QDoubleSpinBox, 0.0, 2.0, 0.3, 0.05)
         self._session_start = self._spin(QSpinBox, 0, 24, 0, 1, suffix=" h")
         self._session_end = self._spin(QSpinBox, 0, 24, 24, 1, suffix=" h")

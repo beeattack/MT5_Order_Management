@@ -15,7 +15,7 @@ A lightweight Windows desktop application for monitoring and managing open posit
 - **Close All** — close every open position in one click (with confirmation)
 - **Trade history** — filter closed deals by date range, with net P&L (including commission and swap) and win rate
 - **Timezone selector** — convert all displayed broker times to a timezone of your choice
-- **Auto Trade** — an M1/M5 EMA + RSI pullback scalper with paper and live modes, risk-based position sizing, and safety guardrails
+- **Auto Trade** — an H1 (1-hour) EMA + RSI pullback swing strategy with paper and live modes, risk-based position sizing, and safety guardrails
 - **Compact mode** — a narrow always-on-top overlay that shows only the essentials so you can keep it beside any chart
 
 ---
@@ -87,15 +87,15 @@ The History tab queries `mt5.history_deals_get(from, to)` and displays each clos
 
 ## Auto Trade
 
-The **Auto Trade** tab runs an automated scalping strategy on the M1 or M5 timeframe.
+The **Auto Trade** tab runs an automated trend-pullback strategy on the H1 (1-hour) timeframe (H4 is also selectable).
 
 ### Strategy — EMA + RSI pullback
 
 - **Trend filter:** only go long when price is above EMA(50); only go short when below.
-- **Trigger:** RSI(7) crossing back up through 30 (long) or down through 70 (short) — a pullback resuming in the trend direction.
-- **Stop loss:** `1.5 × ATR(14)`. **Take profit:** `1.5 × stop`. A **time stop** closes the position after a configurable number of bars.
+- **Trigger:** RSI(14) crossing back up through 40 (long) or down through 60 (short) — a shallow pullback resuming in the trend direction.
+- **Stop loss:** `2.0 × ATR(14)`. **Take profit:** `2.0 × stop` (2:1 reward). A **time stop** closes the position after a configurable number of bars (default 24 = one day on H1).
 
-Signals are evaluated only on **closed** bars (never the forming bar). Because a pullback deep enough to swing RSI under 30 often also drags price below the slow EMA, signals are intentionally infrequent — a quiet log is normal, not a fault.
+Signals are evaluated only on **closed** bars (never the forming bar). The trigger requires a pullback that resumes in the trend direction while price holds the EMA, so entries are selective — a quiet log is normal, not a fault.
 
 ### Modes
 

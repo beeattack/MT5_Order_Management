@@ -1,9 +1,10 @@
-"""Auto-trading orchestrator for the M1/M5 scalping strategy.
+"""Auto-trading orchestrator for the H1 trend-pullback strategy.
 
 Runs on the main thread, driven by a QTimer tick from MainWindow (MT5 is not
 thread-safe). Each tick it: manages exits on open positions, then — only when
 a new bar has just *closed* — asks the strategy for a signal and, if the
-guardrails pass, opens a position.
+guardrails pass, opens a position. The poll interval is much shorter than the
+bar length, which keeps paper SL/TP fills responsive between bar closes.
 
 Two modes:
   - PAPER: trades are simulated in an in-memory book and marked against live
@@ -35,7 +36,7 @@ except ImportError:
 # Tag for the bot's own positions so it never touches manually-opened trades
 AUTO_TRADE_MAGIC = 778899
 
-_TF_SECONDS = {"M1": 60, "M5": 300}
+_TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400}
 _DEFAULT_BALANCE = 10_000.0
 
 
@@ -82,14 +83,14 @@ class AutoTrader:
 
         self.symbol = ""
         self.timeframe = None
-        self._tf_seconds = 300
+        self._tf_seconds = 3600
         self.lookback = 250
 
         self.strategy = None
         self._risk = RiskManager()
 
         # config-driven guardrails
-        self.time_stop = 12
+        self.time_stop = 24
         self.max_positions = 1
         self.daily_loss_pct = 3.0
         self.daily_profit_pct = 5.0
@@ -127,7 +128,7 @@ class AutoTrader:
         self._tf_seconds = _TF_SECONDS.get(tf_name, 300)
         self.mode = config.get("mode", "PAPER")
 
-        self.time_stop = int(config.get("time_stop", 12))
+        self.time_stop = int(config.get("time_stop", 24))
         self.max_positions = int(config.get("max_positions", 1))
         self.daily_loss_pct = float(config.get("daily_loss_pct", 3.0))
         self.daily_profit_pct = float(config.get("daily_profit_pct", 5.0))

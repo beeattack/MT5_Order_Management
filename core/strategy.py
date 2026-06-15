@@ -14,23 +14,29 @@ from models.signal import Signal
 
 
 class EmaRsiPullbackStrategy:
-    """Trend-filtered pullback scalp.
+    """Trend-filtered pullback strategy.
 
     - Trend filter: only long above EMA(trend), only short below.
     - Trigger: RSI crossing back up through `rsi_low` (long) or down through
       `rsi_high` (short) — a pullback resuming in the trend direction.
     - Stop: `atr_mult * ATR(atr_period)`. Target: `rr * stop`.
+
+    Defaults are tuned for the H1 (1-hour) timeframe: a standard RSI(14) with
+    shallow 40/60 pullback thresholds (so price tends to hold the trend EMA),
+    wider 2x-ATR stops to ride H1 volatility, and a 2:1 reward target. For
+    faster timeframes use a shorter RSI period, more extreme thresholds, and a
+    tighter ATR multiple.
     """
 
     def __init__(
         self,
         ema_trend: int = 50,
-        rsi_period: int = 7,
-        rsi_low: float = 30.0,
-        rsi_high: float = 70.0,
+        rsi_period: int = 14,
+        rsi_low: float = 40.0,
+        rsi_high: float = 60.0,
         atr_period: int = 14,
-        atr_mult: float = 1.5,
-        rr: float = 1.5,
+        atr_mult: float = 2.0,
+        rr: float = 2.0,
     ) -> None:
         self.ema_trend = ema_trend
         self.rsi_period = rsi_period
