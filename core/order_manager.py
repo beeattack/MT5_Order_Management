@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+import time
 
 from core import server_clock
+from core import trend_detector
 from core.constants import AUTO_TRADE_MAGIC
 from models.order import Order
 
@@ -18,11 +20,35 @@ except ImportError:
 _SYMBOL_FILLING_FOK = 1
 _SYMBOL_FILLING_IOC = 2
 
+# Per-symbol trend shown on each order row. Recomputed at most every TTL so the
+# 100ms order refresh stays cheap; uses the latest (including forming) bars so
+# the arrow tracks the market live.
+_TREND_TF_NAME = "M5"
+_TREND_TTL_SECONDS = 3.0
+_TREND_LOOKBACK = 150
+
 
 class OrderManager:
     def __init__(self) -> None:
         # digits/step/min don't change during a session — cache per symbol
         self._symbol_info_cache: dict[str, object] = {}
+        # symbol -> (timestamp, trend_state); throttles trend recomputation
+        self._trend_cache: dict[str, tuple[float, str]] = {}
+
+    def _symbol_trend(self, symbol: str) -> str:
+        now = time.time()
+        cached = self._trend_cache.get(symbol)
+        if cached is not None and now - cached[0] < _TREND_TTL_SECONDS:
+            return cached[1]
+
+        state = trend_detector.UNKNOWN
+        tf = getattr(mt5, f"TIMEFRAME_{_TREND_TF_NAME}", None)
+        if tf is not None:
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, _TREND_LOOKBACK)
+            if rates is not None and len(rates) >= 2:
+                state = trend_detector.detect(rates).state
+        self._trend_cache[symbol] = (now, state)
+        return state
 
     def _symbol_info(self, symbol: str):
         info = self._symbol_info_cache.get(symbol)
@@ -95,6 +121,7 @@ class OrderManager:
                 open_time=server_clock.server_ts_to_utc(pos.time),
                 digits=digits,
                 is_auto=(pos.magic == AUTO_TRADE_MAGIC),
+                trend=self._symbol_trend(pos.symbol),
             ))
 
         return orders

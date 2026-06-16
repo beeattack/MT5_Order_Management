@@ -11,6 +11,7 @@ A lightweight Windows desktop application for monitoring and managing open posit
 - **One-click connect** to any already-running MT5 terminal — no login credentials required
 - **Live order table** refreshed every 100 ms: symbol, type, volume, open price, current price, SL/TP, floating P&L, and open time
 - **Symbol-aware prices** — 5-digit forex pairs and 2-digit metals each render with the correct precision
+- **Live trend arrow** — each open order shows its symbol's current trend (▲ up / ▼ down / ~ choppy), ADX-based and refreshed in real time, in both normal and compact mode
 - **Partial close** — close 50%, 80%, 90%, or 100% of any position from the action buttons
 - **Close All** — close every open position in one click (with confirmation)
 - **Trade history** — filter closed deals by date range, with net P&L (including commission and swap) and win rate
@@ -73,6 +74,8 @@ The status bar cycles through three states:
 ### Order Refresh
 
 Once connected, a 100 ms timer polls `mt5.positions_get()` and updates the table. Current price uses `tick.bid` for BUY positions and `tick.ask` for SELL positions (the actual close price), not the lagging `price_current` field from the position struct. Prices are formatted using each symbol's `digits`, so forex and metals both display correctly.
+
+Each row also shows a **trend arrow** for its symbol — ▲ up, ▼ down, ~ choppy — using the same ADX classifier as the watchlist on M5 bars. It's computed per symbol and cached (recomputed at most every few seconds) so the fast refresh stays cheap, and it appears in both normal and compact mode.
 
 ### Server Time
 

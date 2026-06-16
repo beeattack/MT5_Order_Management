@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont, QColor
 
 from models.order import Order
 from core.constants import source_icon, source_label
+from core import trend_detector as td
 from utils.timezone_manager import format_dt, DEFAULT_TZ
 
 COLORS = {
@@ -26,18 +27,35 @@ COLORS = {
     "row_alt":   "#1e2a4a",
 }
 
-_COLUMNS = ["Ticket", "Symbol", "Type", "Volume",
+_COLUMNS = ["Ticket", "Symbol", "Trend", "Type", "Volume",
             "Open Price", "Current", "SL", "TP", "Profit", "Open Time", "Actions"]
+_COL = {name: i for i, name in enumerate(_COLUMNS)}
 
-# Columns hidden in compact mode (by index): Ticket, Open Price, Current, SL, TP, Open Time
-_COMPACT_HIDDEN_COLS = frozenset({0, 4, 5, 6, 7, 9})
+# Numeric columns rendered right-aligned
+_RIGHT_ALIGN_COLS = frozenset(
+    _COL[n] for n in ("Volume", "Open Price", "Current", "SL", "TP", "Profit")
+)
+
+# Columns hidden in compact mode (Symbol, Trend, Type, Volume, Profit, Actions stay visible)
+_COMPACT_HIDDEN_COLS = frozenset(
+    _COL[n] for n in ("Ticket", "Open Price", "Current", "SL", "TP", "Open Time")
+)
 
 # Fixed widths used in compact mode for visible columns
 _COMPACT_COL_WIDTHS = {
     "Symbol":  104,   # wider to fit the source icon prefix
+    "Trend":   48,
     "Type":    56,
     "Volume":  68,
     "Profit":  95,
+}
+
+# Trend arrow glyph + color + tooltip per trend_detector state
+_TREND_DISPLAY = {
+    td.UP:      ("▲", COLORS["green"],   "Up trend"),
+    td.DOWN:    ("▼", COLORS["red"],     "Down trend"),
+    td.CHOPPY:  ("~", COLORS["amber"],   "Choppy — no clear trend"),
+    td.UNKNOWN: ("·", COLORS["subtext"], "Trend unknown"),
 }
 
 _PANEL_QSS = f"""
@@ -213,17 +231,12 @@ class OrdersPanel(QWidget):
         ]
 
         if new_tickets == current_tickets:
-            # Same order list — update only the live columns; leave action widgets intact
+            # Same order list — refresh the live columns (current, profit, trend);
+            # leave action widgets intact
             for row, order in enumerate(orders):
-                self._set_item(row, 5, f"{order.current_price:,.{order.digits}f}")
-                profit_sign = "+" if order.profit >= 0 else ""
-                profit_item = QTableWidgetItem(f"{profit_sign}{order.profit:,.2f}")
-                profit_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                profit_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                profit_item.setForeground(
-                    QColor(COLORS["green"] if order.profit >= 0 else COLORS["red"])
-                )
-                self._table.setItem(row, 8, profit_item)
+                self._set_item(row, _COL["Current"], f"{order.current_price:,.{order.digits}f}")
+                self._set_profit_item(row, order.profit)
+                self._set_trend_item(row, order.trend)
             self._close_all_btn.setEnabled(bool(orders))
             return
 
@@ -232,36 +245,32 @@ class OrdersPanel(QWidget):
         self._table.setRowCount(len(orders))
 
         for row, order in enumerate(orders):
-            self._set_item(row, 0, str(order.ticket))
+            self._set_item(row, _COL["Ticket"], str(order.ticket))
 
             sym_item = QTableWidgetItem(f"{source_icon(order.is_auto)}  {order.symbol}")
             sym_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             sym_item.setToolTip(source_label(order.is_auto))
-            self._table.setItem(row, 1, sym_item)
+            self._table.setItem(row, _COL["Symbol"], sym_item)
+
+            self._set_trend_item(row, order.trend)
 
             type_item = QTableWidgetItem(order.order_type)
             type_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             type_color = QColor(COLORS["green"]) if order.order_type == "BUY" else QColor(COLORS["red"])
             type_item.setForeground(type_color)
-            self._table.setItem(row, 2, type_item)
+            self._table.setItem(row, _COL["Type"], type_item)
 
             d = order.digits
-            self._set_item(row, 3, f"{order.volume:.2f}")
-            self._set_item(row, 4, f"{order.open_price:,.{d}f}")
-            self._set_item(row, 5, f"{order.current_price:,.{d}f}")
-            self._set_item(row, 6, f"{order.sl:,.{d}f}" if order.sl else "—")
-            self._set_item(row, 7, f"{order.tp:,.{d}f}" if order.tp else "—")
-
-            profit_sign = "+" if order.profit >= 0 else ""
-            profit_item = QTableWidgetItem(f"{profit_sign}{order.profit:,.2f}")
-            profit_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            profit_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            profit_color = QColor(COLORS["green"]) if order.profit >= 0 else QColor(COLORS["red"])
-            profit_item.setForeground(profit_color)
-            self._table.setItem(row, 8, profit_item)
-
-            self._set_item(row, 9, format_dt(order.open_time, self._tz_name))
-            self._table.setCellWidget(row, 10, self._make_action_widget(order.ticket, order.volume))
+            self._set_item(row, _COL["Volume"], f"{order.volume:.2f}")
+            self._set_item(row, _COL["Open Price"], f"{order.open_price:,.{d}f}")
+            self._set_item(row, _COL["Current"], f"{order.current_price:,.{d}f}")
+            self._set_item(row, _COL["SL"], f"{order.sl:,.{d}f}" if order.sl else "—")
+            self._set_item(row, _COL["TP"], f"{order.tp:,.{d}f}" if order.tp else "—")
+            self._set_profit_item(row, order.profit)
+            self._set_item(row, _COL["Open Time"], format_dt(order.open_time, self._tz_name))
+            self._table.setCellWidget(
+                row, _COL["Actions"], self._make_action_widget(order.ticket, order.volume)
+            )
 
         self._close_all_btn.setEnabled(bool(orders))
 
@@ -272,11 +281,31 @@ class OrdersPanel(QWidget):
     def _set_item(self, row: int, col: int, text: str) -> None:
         item = QTableWidgetItem(text)
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        if col in (3, 4, 5, 6, 7, 8):
+        if col in _RIGHT_ALIGN_COLS:
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._table.setItem(row, col, item)
 
-    _ACTIONS_COL = len(_COLUMNS) - 1  # index 10
+    def _set_profit_item(self, row: int, profit: float) -> None:
+        sign = "+" if profit >= 0 else ""
+        item = QTableWidgetItem(f"{sign}{profit:,.2f}")
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item.setForeground(QColor(COLORS["green"] if profit >= 0 else COLORS["red"]))
+        self._table.setItem(row, _COL["Profit"], item)
+
+    def _set_trend_item(self, row: int, state: str) -> None:
+        glyph, color, tip = _TREND_DISPLAY.get(state, _TREND_DISPLAY[td.UNKNOWN])
+        item = QTableWidgetItem(glyph)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setForeground(QColor(color))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont("Consolas", 13)
+        font.setBold(state in (td.UP, td.DOWN))
+        item.setFont(font)
+        item.setToolTip(tip)
+        self._table.setItem(row, _COL["Trend"], item)
+
+    _ACTIONS_COL = _COL["Actions"]
     _ACTIONS_COMPACT_WIDTH = 235  # fixed width just enough for all 4 buttons at normal padding
 
     # Total compact content width (visible columns + Actions); caller adds chrome offset
@@ -329,8 +358,8 @@ class OrdersPanel(QWidget):
     def _rebuild_action_widgets(self) -> None:
         actions_col = self._ACTIONS_COL
         for row in range(self._table.rowCount()):
-            ticket_item = self._table.item(row, 0)
-            volume_item = self._table.item(row, 3)
+            ticket_item = self._table.item(row, _COL["Ticket"])
+            volume_item = self._table.item(row, _COL["Volume"])
             if ticket_item is None:
                 continue
             try:
