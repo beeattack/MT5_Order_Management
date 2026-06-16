@@ -16,6 +16,7 @@ A lightweight Windows desktop application for monitoring and managing open posit
 - **Trade history** — filter closed deals by date range, with net P&L (including commission and swap) and win rate
 - **Performance dashboard** — full trade analytics (profit factor, expectancy, drawdown, equity curve, per-symbol/direction/source breakdowns) plus a rule-based "coach" that suggests improvements from your own history
 - **Source tagging** — every order is marked 🤖 (auto-trader) or 👤 (manual) in all order views
+- **Watchlist trend alerts** — monitor a list of symbols and get a sound alert when one enters a clear trend (ADX-based), so you can act when it's trending rather than choppy
 - **Timezone selector** — convert all displayed broker times to a timezone of your choice
 - **Auto Trade** — an H1 (1-hour) EMA + RSI pullback swing strategy with paper and live modes, risk-based position sizing, and safety guardrails
 - **Compact mode** — a narrow always-on-top overlay that shows only the essentials so you can keep it beside any chart
@@ -130,13 +131,30 @@ Position size is computed from a risk-per-trade percentage so a stop-out loses a
 
 ---
 
+## Watchlist — Trend Alerts
+
+The **Watchlist** tab monitors a list of symbols on a chosen timeframe (M15/M30/H1/H4) and alerts you when one enters a **clear trend** — a better moment to open a trade than a choppy, range-bound market.
+
+### How a "clear trend" is decided
+
+- **ADX** (Average Directional Index) measures trend *strength*. ADX ≥ 25 means a real trend; below that the market is treated as choppy and **no alert** fires.
+- Direction must agree: **+DI > −DI and price above EMA(50)** → UP; the mirror → DOWN. If ADX is strong but the direction signals disagree, it stays choppy. This keeps alerts to genuinely clean setups.
+
+### Alerts
+
+When a symbol *transitions* into a clear UP or DOWN trend, the app plays a sound and logs it. The alert is **edge-triggered** — it fires once at trend onset and re-arms on a flip or a return to choppy, so it won't repeat while a trend persists. A **mute** toggle and a **Test** button are provided. The table shows each symbol's live trend state, ADX, and +DI/−DI; trends are evaluated on **closed bars only**.
+
+The watchlist (symbols, timeframe, mute) is saved to `~/.mt5_order_manager/watchlist.json` and restored on the next launch. Scanning runs only while connected and "Start Watching" is on.
+
+---
+
 ## Display Modes
 
 | | Normal | Compact |
 |---|---|---|
 | Window size | Freely resizable (min 900×500) | Fixed width, height-only resizable |
 | Always on top | No | Yes |
-| Tabs | Active Orders + History + Dashboard + Auto Trade | Active Orders only |
+| Tabs | Dashboard + Active Orders + History + Watchlist + Auto Trade | Active Orders only |
 | Columns shown | All | Symbol, Type, Volume, Profit |
 | Account info | Name + Balance + Equity + P&L | Equity + P&L only |
 
@@ -171,7 +189,9 @@ MT5_Order_Management/
 │   ├── auto_trader.py       # Auto-trade orchestrator (paper + live)
 │   ├── strategy.py          # EMA + RSI pullback strategy
 │   ├── risk_manager.py      # Risk-based position sizing
-│   └── indicators.py        # NumPy EMA / RSI / ATR
+│   ├── trend_detector.py    # ADX-based clear-trend vs choppy classifier
+│   ├── watchlist.py         # Watchlist monitor + alert logic + persistence
+│   └── indicators.py        # NumPy EMA / RSI / ATR / ADX
 ├── models/
 │   ├── order.py             # Order dataclass
 │   ├── history_entry.py     # HistoryEntry dataclass
@@ -182,9 +202,11 @@ MT5_Order_Management/
 │   ├── orders_panel.py      # Live order table with action buttons
 │   ├── history_panel.py     # History table + filter controls
 │   ├── dashboard_panel.py   # Performance analytics + insights tab
+│   ├── watchlist_panel.py   # Watchlist config + trend table + alert log
 │   └── autotrade_panel.py   # Auto-trade config, stats, decision log
 └── utils/
-    └── timezone_manager.py  # Timezone conversion helpers
+    ├── timezone_manager.py  # Timezone conversion helpers
+    └── sound.py             # Non-blocking alert sound (winsound)
 ```
 
 ---
