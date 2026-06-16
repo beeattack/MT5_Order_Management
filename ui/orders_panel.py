@@ -352,15 +352,16 @@ class OrdersPanel(QWidget):
         layout.addStretch()
 
         btn_specs = [
-            ("Close", COLORS["red"],   100.0),
-            ("50%",   COLORS["amber"],  50.0),
-            ("80%",   COLORS["amber"],  80.0),
-            ("90%",   COLORS["amber"],  90.0),
+            ("✕", COLORS["red"],   100.0),   # ✕ — close (100%)
+            ("50%",    COLORS["amber"],  50.0),
+            ("80%",    COLORS["amber"],  80.0),
+            ("90%",    COLORS["amber"],  90.0),
         ]
 
         for label, color, pct in btn_specs:
             btn = QPushButton(label)
             btn.setFixedHeight(22)
+            btn.setToolTip("Close position (100%)" if pct >= 100 else f"Close {pct:.0f}%")
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: {color}; color: #1a1a2e; "
                 f"border-radius: 3px; font-size: 11px; font-weight: bold; padding: {btn_padding}; }}"
