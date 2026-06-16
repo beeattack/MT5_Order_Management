@@ -22,7 +22,7 @@ except ImportError:
     mt5 = None  # type: ignore[assignment]
     MT5_AVAILABLE = False
 
-TIMEFRAMES = ["M15", "M30", "H1", "H4"]
+TIMEFRAMES = ["M1", "M5", "M30", "H1", "H4"]
 DEFAULT_TIMEFRAME = "H1"
 
 _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".mt5_order_manager")
@@ -31,6 +31,19 @@ _CONFIG_PATH = os.path.join(_CONFIG_DIR, "watchlist.json")
 
 def _tf_constant(name: str):
     return getattr(mt5, f"TIMEFRAME_{name}", None) if MT5_AVAILABLE else None
+
+
+def market_watch_symbols() -> list[str]:
+    """Names of the symbols currently shown in the MT5 Market Watch."""
+    if not MT5_AVAILABLE:
+        return []
+    try:
+        syms = mt5.symbols_get()
+    except Exception:
+        syms = None
+    if not syms:
+        return []
+    return sorted(s.name for s in syms if getattr(s, "visible", False))
 
 
 class WatchlistMonitor:

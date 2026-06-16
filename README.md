@@ -133,7 +133,9 @@ Position size is computed from a risk-per-trade percentage so a stop-out loses a
 
 ## Watchlist — Trend Alerts
 
-The **Watchlist** tab monitors a list of symbols on a chosen timeframe (M15/M30/H1/H4) and alerts you when one enters a **clear trend** — a better moment to open a trade than a choppy, range-bound market.
+The **Watchlist** tab monitors a list of symbols on a chosen timeframe and alerts you when one enters a **clear trend** — a better moment to open a trade than a choppy, range-bound market.
+
+Symbols are chosen from a dropdown populated with your **MT5 Market Watch** symbols (loaded on connect). The timeframe selector offers **M1 / M5 / M30 / H1 / H4** (default H1).
 
 ### How a "clear trend" is decided
 
@@ -142,9 +144,20 @@ The **Watchlist** tab monitors a list of symbols on a chosen timeframe (M15/M30/
 
 ### Alerts
 
-When a symbol *transitions* into a clear UP or DOWN trend, the app plays a sound and logs it. The alert is **edge-triggered** — it fires once at trend onset and re-arms on a flip or a return to choppy, so it won't repeat while a trend persists. A **mute** toggle and a **Test** button are provided. The table shows each symbol's live trend state, ADX, and +DI/−DI; trends are evaluated on **closed bars only**.
+When a symbol *transitions* into a clear UP or DOWN trend, the app fires an alert through three channels: a **sound**, a **Windows desktop notification**, and a **native MT5 alert** (see below). The alert is **edge-triggered** — it fires once at trend onset and re-arms on a flip or a return to choppy, so it won't repeat while a trend persists. A **mute** toggle (sound only) and a **Test** button (exercises all three channels) are provided. The table shows each symbol's live trend state, ADX, and +DI/−DI; trends are evaluated on **closed bars only**.
 
 The watchlist (symbols, timeframe, mute) is saved to `~/.mt5_order_manager/watchlist.json` and restored on the next launch. Scanning runs only while connected and "Start Watching" is on.
+
+### Native MT5 alerts (optional one-time setup)
+
+The MT5 *Python* API cannot raise the terminal's own `Alert()`, so this is done with a small bridge: the app writes each alert to `<MT5 Common>\Files\mt5om_alerts.txt`, and an MQL5 indicator running in the terminal reads that file and raises a real MT5 alert. To enable it:
+
+1. In MT5: **File → Open Data Folder**, then open `MQL5\Indicators\`.
+2. Copy [`mt5_bridge/WatchlistAlertBridge.mq5`](mt5_bridge/WatchlistAlertBridge.mq5) into that folder.
+3. Open it in **MetaEditor** and **Compile** (F7).
+4. Drag **WatchlistAlertBridge** from the terminal's Navigator onto any chart and leave it attached.
+
+Without this indicator the sound and desktop notification still work; only the in-terminal MT5 alert requires it.
 
 ---
 
@@ -191,6 +204,7 @@ MT5_Order_Management/
 │   ├── risk_manager.py      # Risk-based position sizing
 │   ├── trend_detector.py    # ADX-based clear-trend vs choppy classifier
 │   ├── watchlist.py         # Watchlist monitor + alert logic + persistence
+│   ├── mt5_alert_bridge.py  # Writes alerts for the MT5 indicator to raise
 │   └── indicators.py        # NumPy EMA / RSI / ATR / ADX
 ├── models/
 │   ├── order.py             # Order dataclass
@@ -204,9 +218,11 @@ MT5_Order_Management/
 │   ├── dashboard_panel.py   # Performance analytics + insights tab
 │   ├── watchlist_panel.py   # Watchlist config + trend table + alert log
 │   └── autotrade_panel.py   # Auto-trade config, stats, decision log
-└── utils/
-    ├── timezone_manager.py  # Timezone conversion helpers
-    └── sound.py             # Non-blocking alert sound (winsound)
+├── utils/
+│   ├── timezone_manager.py  # Timezone conversion helpers
+│   └── sound.py             # Non-blocking alert sound (winsound)
+└── mt5_bridge/
+    └── WatchlistAlertBridge.mq5  # MT5 indicator that raises native alerts
 ```
 
 ---

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
-    QTabWidget, QMessageBox, QDialog, QTextBrowser,
+    QTabWidget, QMessageBox, QDialog, QTextBrowser, QSystemTrayIcon,
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -20,8 +20,9 @@ from ui.dashboard_panel  import DashboardPanel
 from ui.watchlist_panel  import WatchlistPanel
 
 from core.auto_trader import AutoTrader
-from core.watchlist import WatchlistMonitor
+from core.watchlist import WatchlistMonitor, market_watch_symbols
 from core import analytics
+from core import mt5_alert_bridge
 from utils.sound import play_alert
 
 COLORS = {
@@ -233,6 +234,12 @@ class MainWindow(QMainWindow):
             self.watchlist.symbols, self.watchlist.timeframe_name, self.watchlist.muted
         )
 
+        # Tray icon for desktop trend-alert notifications
+        self._tray = QSystemTrayIcon(self.windowIcon(), self)
+        self._tray.setToolTip("MT5 Order Manager")
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray.show()
+
         self._setup_timers()
 
     # ------------------------------------------------------------------
@@ -282,7 +289,7 @@ class MainWindow(QMainWindow):
         self._watchlist_panel.timeframe_changed.connect(self._on_watch_timeframe)
         self._watchlist_panel.watch_toggled.connect(self._on_watch_toggle)
         self._watchlist_panel.mute_toggled.connect(self._on_watch_mute)
-        self._watchlist_panel.test_sound_requested.connect(play_alert)
+        self._watchlist_panel.test_sound_requested.connect(self._on_watch_test)
 
         # Dashboard is the leftmost tab and the default landing view
         self._tabs.addTab(self._dashboard_panel, "Dashboard")
@@ -291,6 +298,7 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._watchlist_panel, "Watchlist")
         self._tabs.addTab(self._autotrade_panel, "Auto Trade")
         self._tabs.setCurrentWidget(self._dashboard_panel)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         layout.addWidget(self._tabs)
 
@@ -388,6 +396,7 @@ class MainWindow(QMainWindow):
             self._orders_timer.start()
             self._refresh_orders()
             self._on_dashboard_period(*self._dashboard_panel.current_range())
+            self._refresh_watch_symbols()
             if self.watchlist.enabled:
                 self._watchlist_timer.start()
                 self.watchlist.on_tick()
@@ -536,8 +545,42 @@ class MainWindow(QMainWindow):
 
     def _on_watch_alert(self, symbol: str, reading) -> None:
         self._watchlist_panel.log_alert(symbol, reading)
+        msg = f"Clear {reading.state} trend (ADX {reading.adx:.0f}) - possible entry"
+        self._notify(f"Trend Alert — {symbol}", msg)
+        mt5_alert_bridge.write_alert(f"{symbol}: {msg}")
         if not self.watchlist.muted:
             play_alert()
+
+    def _notify(self, title: str, message: str) -> None:
+        """Desktop (system tray) notification for trend alerts."""
+        if self._tray is not None and QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray.showMessage(
+                title, message, QSystemTrayIcon.MessageIcon.Information, 6000
+            )
+
+    def _on_watch_test(self) -> None:
+        """Exercise the full alert path: sound + desktop notification + MT5 alert."""
+        self._notify("Trend Alert — TEST", "Test alert: sound + desktop + MT5 alert.")
+        play_alert()
+        wrote = mt5_alert_bridge.write_alert("TEST: MT5 Order Manager watchlist alert")
+        if wrote:
+            self._watchlist_panel.log_message(
+                "Test fired — sound + desktop notification; MT5 alert written "
+                "(install the WatchlistAlertBridge indicator in MT5 to see it pop up)."
+            )
+        else:
+            self._watchlist_panel.log_message(
+                "Test fired — sound + desktop notification; MT5 alert NOT written "
+                "(connect to MT5 first)."
+            )
+
+    def _refresh_watch_symbols(self) -> None:
+        if self._connected and self.connector.is_connected():
+            self._watchlist_panel.set_symbol_choices(market_watch_symbols())
+
+    def _on_tab_changed(self, index: int) -> None:
+        if self._tabs.widget(index) is self._watchlist_panel:
+            self._refresh_watch_symbols()
 
     # ------------------------------------------------------------------
     # Slot — timezone change

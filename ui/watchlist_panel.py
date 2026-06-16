@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QTextEdit,
 )
@@ -101,11 +101,15 @@ class WatchlistPanel(QWidget):
         ctrl = QHBoxLayout()
         ctrl.setSpacing(8)
 
-        self._symbol_input = QLineEdit()
-        self._symbol_input.setPlaceholderText("Symbol e.g. GOLD#")
-        self._symbol_input.setFixedWidth(150)
-        self._symbol_input.returnPressed.connect(self._emit_add)
-        ctrl.addWidget(self._symbol_input)
+        sym_lbl = QLabel("Symbol:")
+        sym_lbl.setObjectName("fieldLabel")
+        ctrl.addWidget(sym_lbl)
+
+        self._symbol_combo = QComboBox()
+        self._symbol_combo.setEditable(False)
+        self._symbol_combo.setPlaceholderText("Connect to load Market Watch")
+        self._symbol_combo.setFixedWidth(170)
+        ctrl.addWidget(self._symbol_combo)
 
         add_btn = QPushButton("Add")
         add_btn.setFixedWidth(70)
@@ -132,6 +136,7 @@ class WatchlistPanel(QWidget):
 
         test_btn = QPushButton("Test")
         test_btn.setFixedWidth(60)
+        test_btn.setToolTip("Test alert — plays the sound and shows a desktop notification")
         test_btn.clicked.connect(self.test_sound_requested)
         ctrl.addWidget(test_btn)
 
@@ -175,10 +180,19 @@ class WatchlistPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _emit_add(self) -> None:
-        sym = self._symbol_input.text().strip()
+        sym = self._symbol_combo.currentText().strip()
         if sym:
             self.add_requested.emit(sym)
-            self._symbol_input.clear()
+
+    def set_symbol_choices(self, symbols: list[str]) -> None:
+        """Populate the symbol combo from the MT5 Market Watch."""
+        current = self._symbol_combo.currentText()
+        self._symbol_combo.blockSignals(True)
+        self._symbol_combo.clear()
+        self._symbol_combo.addItems(symbols)
+        idx = self._symbol_combo.findText(current)
+        self._symbol_combo.setCurrentIndex(idx if idx >= 0 else -1)
+        self._symbol_combo.blockSignals(False)
 
     def _on_mute(self, checked: bool) -> None:
         self._mute_btn.setText("🔕 Muted" if checked else "🔔 Sound On")
@@ -285,6 +299,10 @@ class WatchlistPanel(QWidget):
         self._log.append(
             f"[{stamp}] 🔔 {symbol}: clear {word} (ADX {reading.adx:.0f}) — possible entry"
         )
+
+    def log_message(self, text: str) -> None:
+        stamp = datetime.now().strftime("%H:%M:%S")
+        self._log.append(f"[{stamp}] {text}")
 
     def set_watching(self, watching: bool) -> None:
         self._watch_btn.blockSignals(True)
