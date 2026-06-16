@@ -98,6 +98,7 @@ class HistoryManager:
                 is_win=net_profit > 0,
                 digits=self._symbol_digits(deal.symbol),
                 is_auto=(entry_magic == AUTO_TRADE_MAGIC),
+                position_id=deal.position_id,
             ))
 
         # Sort newest first

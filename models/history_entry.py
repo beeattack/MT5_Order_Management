@@ -16,3 +16,4 @@ class HistoryEntry:
     is_win: bool        # profit > 0 (net of commission/swap/fee)
     digits: int = 2     # price decimal places from symbol_info
     is_auto: bool = False   # opened by the auto-trader (magic == AUTO_TRADE_MAGIC)
+    position_id: int = 0    # MT5 position the closing deal belongs to

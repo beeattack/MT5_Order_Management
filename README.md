@@ -14,6 +14,8 @@ A lightweight Windows desktop application for monitoring and managing open posit
 - **Partial close** — close 50%, 80%, 90%, or 100% of any position from the action buttons
 - **Close All** — close every open position in one click (with confirmation)
 - **Trade history** — filter closed deals by date range, with net P&L (including commission and swap) and win rate
+- **Performance dashboard** — full trade analytics (profit factor, expectancy, drawdown, equity curve, per-symbol/direction/source breakdowns) plus a rule-based "coach" that suggests improvements from your own history
+- **Source tagging** — every order is marked 🤖 (auto-trader) or 👤 (manual) in all order views
 - **Timezone selector** — convert all displayed broker times to a timezone of your choice
 - **Auto Trade** — an H1 (1-hour) EMA + RSI pullback swing strategy with paper and live modes, risk-based position sizing, and safety guardrails
 - **Compact mode** — a narrow always-on-top overlay that shows only the essentials so you can keep it beside any chart
@@ -85,6 +87,22 @@ The History tab queries `mt5.history_deals_get(from, to)` and displays each clos
 
 ---
 
+## Performance Dashboard
+
+The **Dashboard** tab turns your closed-trade history into analytics over a selectable period (1W / 1M / 3M / YTD / All). Closing deals are first grouped into position-level trades (a position closed in several partials counts as one trade), then everything is derived from that:
+
+- **Stat cards:** net P&L, profit factor, win rate, expectancy, average win/loss and payoff ratio, max drawdown, recovery factor, largest win/loss, longest losing streak, and average holding time.
+- **Equity curve:** cumulative closed-trade P&L, drawn directly with `QPainter` (no charting dependency).
+- **Breakdowns:** performance by symbol, by direction (BUY/SELL), and by source (🤖 auto vs 👤 manual).
+
+### Insights — coaching from your own history
+
+The dashboard also runs a **rule-based insights engine** that flags patterns and suggests behavioral fixes — e.g. "losers are bigger than winners," "EURUSD is dragging the account," "you hold losers longer than winners," or "auto is outperforming manual." Each insight is colored by severity and pairs a data finding with a concrete suggestion.
+
+These are **descriptive, not predictive** — they summarize what already happened in your data, not what the market will do. Every rule is gated on sample size (nothing fires below 10 trades), and time-of-day/weekday patterns are presented as hypotheses to investigate, not rules to follow blindly.
+
+---
+
 ## Auto Trade
 
 The **Auto Trade** tab runs an automated trend-pullback strategy on the H1 (1-hour) timeframe (H4 is also selectable).
@@ -118,7 +136,7 @@ Position size is computed from a risk-per-trade percentage so a stop-out loses a
 |---|---|---|
 | Window size | Freely resizable (min 900×500) | Fixed width, height-only resizable |
 | Always on top | No | Yes |
-| Tabs | Active Orders + History + Auto Trade | Active Orders only |
+| Tabs | Active Orders + History + Dashboard + Auto Trade | Active Orders only |
 | Columns shown | All | Symbol, Type, Volume, Profit |
 | Account info | Name + Balance + Equity + P&L | Equity + P&L only |
 
@@ -148,10 +166,12 @@ MT5_Order_Management/
 │   ├── order_manager.py     # Position reads, open and close logic
 │   ├── history_manager.py   # Deal history queries and statistics
 │   ├── server_clock.py      # Broker server → UTC offset estimation
-│   ├── auto_trader.py        # Auto-trade orchestrator (paper + live)
-│   ├── strategy.py           # EMA + RSI pullback strategy
-│   ├── risk_manager.py       # Risk-based position sizing
-│   └── indicators.py         # NumPy EMA / RSI / ATR
+│   ├── constants.py         # Auto-trade magic + source icon helpers
+│   ├── analytics.py         # Performance stats + rule-based insights
+│   ├── auto_trader.py       # Auto-trade orchestrator (paper + live)
+│   ├── strategy.py          # EMA + RSI pullback strategy
+│   ├── risk_manager.py      # Risk-based position sizing
+│   └── indicators.py        # NumPy EMA / RSI / ATR
 ├── models/
 │   ├── order.py             # Order dataclass
 │   ├── history_entry.py     # HistoryEntry dataclass
@@ -161,6 +181,7 @@ MT5_Order_Management/
 │   ├── connection_panel.py  # Status bar + account stats + timezone
 │   ├── orders_panel.py      # Live order table with action buttons
 │   ├── history_panel.py     # History table + filter controls
+│   ├── dashboard_panel.py   # Performance analytics + insights tab
 │   └── autotrade_panel.py   # Auto-trade config, stats, decision log
 └── utils/
     └── timezone_manager.py  # Timezone conversion helpers

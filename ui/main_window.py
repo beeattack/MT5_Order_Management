@@ -16,8 +16,10 @@ from ui.connection_panel import ConnectionPanel
 from ui.orders_panel     import OrdersPanel
 from ui.history_panel    import HistoryPanel
 from ui.autotrade_panel  import AutoTradePanel
+from ui.dashboard_panel  import DashboardPanel
 
 from core.auto_trader import AutoTrader
+from core import analytics
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -255,6 +257,10 @@ class MainWindow(QMainWindow):
         self._history_panel.filter_requested.connect(self._on_filter_history)
         self._tabs.addTab(self._history_panel, "History")
 
+        self._dashboard_panel = DashboardPanel()
+        self._dashboard_panel.period_changed.connect(self._on_dashboard_period)
+        self._tabs.addTab(self._dashboard_panel, "Dashboard")
+
         self._autotrade_panel = AutoTradePanel()
         self._autotrade_panel.start_requested.connect(self._on_autotrade_start)
         self._autotrade_panel.stop_requested.connect(self._on_autotrade_stop)
@@ -351,6 +357,7 @@ class MainWindow(QMainWindow):
             self._detection_timer.stop()
             self._orders_timer.start()
             self._refresh_orders()
+            self._on_dashboard_period(*self._dashboard_panel.current_range())
         else:
             QMessageBox.critical(
                 self,
@@ -368,6 +375,7 @@ class MainWindow(QMainWindow):
         self._conn_panel.set_state_detected()
         self._orders_panel.update_orders([])
         self._history_panel.clear()
+        self._dashboard_panel.clear()
         self._detection_timer.start()
 
     # ------------------------------------------------------------------
@@ -469,6 +477,18 @@ class MainWindow(QMainWindow):
         self._history_panel.update_history(entries, summary, win_rate)
 
     # ------------------------------------------------------------------
+    # Slot — dashboard
+    # ------------------------------------------------------------------
+
+    def _on_dashboard_period(self, from_dt: datetime, to_dt: datetime) -> None:
+        if not self._connected:
+            self._dashboard_panel.clear()
+            return
+        entries = self.history_mgr.get_history(from_dt, to_dt)
+        stats = analytics.compute(entries)
+        self._dashboard_panel.update_dashboard(stats, analytics.insights(stats))
+
+    # ------------------------------------------------------------------
     # Timer callbacks
     # ------------------------------------------------------------------
 
@@ -482,13 +502,11 @@ class MainWindow(QMainWindow):
         self._orders_panel.update_orders(orders)
         account_info = self.connector.get_account_info()
         if account_info:
+            balance = account_info.get("balance", 0.0)
             equity = account_info.get("equity", 0.0)
             profit = account_info.get("profit", 0.0)
-            self._conn_panel.update_account_stats(
-                account_info.get("balance", 0.0),
-                equity,
-                profit,
-            )
+            self._conn_panel.update_account_stats(balance, equity, profit)
+            self._dashboard_panel.update_account(balance, equity, profit, len(orders))
             if self._compact_mode:
                 self._orders_panel.update_compact_stats(equity, profit)
 
