@@ -251,21 +251,24 @@ class MainWindow(QMainWindow):
         self._orders_panel = OrdersPanel()
         self._orders_panel.close_order_requested.connect(self._on_close_order)
         self._orders_panel.close_all_requested.connect(self._on_close_all_orders)
-        self._tabs.addTab(self._orders_panel, "Active Orders")
 
         self._history_panel = HistoryPanel()
         self._history_panel.filter_requested.connect(self._on_filter_history)
-        self._tabs.addTab(self._history_panel, "History")
 
         self._dashboard_panel = DashboardPanel()
         self._dashboard_panel.period_changed.connect(self._on_dashboard_period)
-        self._tabs.addTab(self._dashboard_panel, "Dashboard")
 
         self._autotrade_panel = AutoTradePanel()
         self._autotrade_panel.start_requested.connect(self._on_autotrade_start)
         self._autotrade_panel.stop_requested.connect(self._on_autotrade_stop)
         self._autotrade_panel.kill_requested.connect(self._on_autotrade_kill)
+
+        # Dashboard is the leftmost tab and the default landing view
+        self._tabs.addTab(self._dashboard_panel, "Dashboard")
+        self._tabs.addTab(self._orders_panel, "Active Orders")
+        self._tabs.addTab(self._history_panel, "History")
         self._tabs.addTab(self._autotrade_panel, "Auto Trade")
+        self._tabs.setCurrentWidget(self._dashboard_panel)
 
         layout.addWidget(self._tabs)
 
@@ -531,11 +534,11 @@ class MainWindow(QMainWindow):
         self._conn_panel.set_compact_layout(compact)
         self._orders_panel.set_compact_mode(compact)
 
-        # Hide menu and tab bar, lock to orders tab in compact mode
+        # Hide menu and tab bar, lock to the orders table in compact mode
         self.menuBar().setVisible(not compact)
         self._tabs.tabBar().setVisible(not compact)
         if compact:
-            self._tabs.setCurrentIndex(0)
+            self._tabs.setCurrentWidget(self._orders_panel)
 
         if compact:
             # Remove size constraints before setting new flags so resize isn't clamped

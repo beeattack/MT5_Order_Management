@@ -148,7 +148,7 @@ class EquityCurveWidget(QWidget):
 class DashboardPanel(QWidget):
     period_changed = Signal(object, object)   # (from_dt, to_dt) UTC-aware
 
-    _PERIODS = ["1W", "1M", "3M", "YTD", "All"]
+    _PERIODS = ["Today", "1W", "1M", "3M", "YTD", "All"]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -293,7 +293,9 @@ class DashboardPanel(QWidget):
 
     def current_range(self) -> tuple[datetime, datetime]:
         now = datetime.now(timezone.utc)
-        if self._period == "1W":
+        if self._period == "Today":
+            frm = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif self._period == "1W":
             frm = now - timedelta(days=7)
         elif self._period == "1M":
             frm = now - timedelta(days=30)
