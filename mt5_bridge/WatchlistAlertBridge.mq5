@@ -13,12 +13,19 @@
 //|    3. In the terminal, drag "WatchlistAlertBridge" from the       |
 //|       Navigator onto ANY open chart. Leave it attached.           |
 //|    Native MT5 alerts will then fire whenever the app raises one.  |
+//|                                                                   |
+//|  PUSH NOTIFICATIONS (optional): set InpPushNotification = true to |
+//|  also push each alert to the MT5 mobile app. Requires Tools >     |
+//|  Options > Notifications: enable push and enter your MetaQuotes   |
+//|  ID (from the mobile app's settings).                             |
 //+------------------------------------------------------------------+
 #property indicator_chart_window
 #property indicator_plots 0
 #property strict
 
-input int InpPollSeconds = 2;   // how often to check for new alerts
+input int  InpPollSeconds     = 2;      // how often to check for new alerts (seconds)
+input bool InpDesktopAlert    = true;   // raise a terminal Alert() popup + sound
+input bool InpPushNotification = false; // also push to the MT5 mobile app
 
 string FileName    = "mt5om_alerts.txt";
 long   g_last_size = 0;
@@ -68,7 +75,12 @@ void OnTimer()
    {
       string line = FileReadString(h);
       if(StringLen(line) > 0)
-         Alert(line);
+      {
+         if(InpDesktopAlert)
+            Alert(line);
+         if(InpPushNotification)
+            SendNotification(line);
+      }
    }
    g_last_size = size;
    FileClose(h);

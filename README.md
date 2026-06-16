@@ -159,6 +159,8 @@ The MT5 *Python* API cannot raise the terminal's own `Alert()`, so this is done 
 
 Without this indicator the sound and desktop notification still work; only the in-terminal MT5 alert requires it.
 
+**Mobile push notifications (optional):** set the indicator's `InpPushNotification` input to `true` to also push each alert to the MT5 mobile app. This requires **Tools → Options → Notifications** in the terminal: enable push notifications and enter your **MetaQuotes ID** (shown in the mobile app's settings). The `InpDesktopAlert` input controls the terminal popup; you can run either or both.
+
 ---
 
 ## Display Modes
