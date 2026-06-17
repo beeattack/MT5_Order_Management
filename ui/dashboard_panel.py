@@ -152,10 +152,11 @@ class DonutChartWidget(QWidget):
         super().__init__(parent)
         self._wins = 0
         self._losses = 0
+        self._breakeven = 0.0
         self.setMinimumSize(200, 152)
 
-    def set_data(self, wins: int, losses: int) -> None:
-        self._wins, self._losses = wins, losses
+    def set_data(self, wins: int, losses: int, breakeven: float = 0.0) -> None:
+        self._wins, self._losses, self._breakeven = wins, losses, breakeven
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -193,8 +194,9 @@ class DonutChartWidget(QWidget):
         p.setPen(QPen(QColor(COLORS["red"]), thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
         p.drawArc(ring, start - wins_span * 16, -(360 - wins_span) * 16)
 
-        # center: big win rate %
-        p.setPen(QColor(COLORS["green"] if wr >= 50 else COLORS["red"]))
+        # center: big win rate %, colored vs the breakeven win rate (the target)
+        meets = wr >= self._breakeven
+        p.setPen(QColor(COLORS["green"] if meets else COLORS["red"]))
         p.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
         p.drawText(QRectF(rx, ry + diam / 2 - 28, diam, 34),
                    Qt.AlignmentFlag.AlignCenter, f"{wr:.0f}%")
@@ -203,12 +205,11 @@ class DonutChartWidget(QWidget):
         p.drawText(QRectF(rx, ry + diam / 2 + 4, diam, 16),
                    Qt.AlignmentFlag.AlignCenter, "WIN RATE")
 
-        # legend under the ring
+        # legend + breakeven target under the ring
         p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
-        p.setPen(QColor(COLORS["green"]))
-        p.drawText(QRectF(0, ry + diam + 4, w / 2, 16), Qt.AlignmentFlag.AlignRight, f"{self._wins} W  ")
-        p.setPen(QColor(COLORS["red"]))
-        p.drawText(QRectF(w / 2, ry + diam + 4, w / 2, 16), Qt.AlignmentFlag.AlignLeft, f"  {self._losses} L")
+        p.setPen(QColor(COLORS["subtext"]))
+        p.drawText(QRectF(0, ry + diam + 4, w, 16), Qt.AlignmentFlag.AlignHCenter,
+                   f"{self._wins}W · {self._losses}L  ·  target ≥ {self._breakeven:.0f}%")
 
 
 class DashboardPanel(QWidget):
@@ -222,6 +223,7 @@ class DashboardPanel(QWidget):
         super().__init__(parent)
         self.setStyleSheet(_PANEL_QSS)
         self._cards: dict[str, QLabel] = {}
+        self._targets: dict[str, QLabel] = {}
         self._period = "1M"
         self._build_ui()
 
@@ -326,7 +328,7 @@ class DashboardPanel(QWidget):
     def _make_card(self, key: str, hero: bool = False) -> QFrame:
         card = QFrame()
         card.setObjectName("card")
-        card.setMinimumHeight(96 if hero else 58)
+        card.setMinimumHeight(100 if hero else 64)
         lay = QVBoxLayout(card)
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(2)
@@ -338,11 +340,15 @@ class DashboardPanel(QWidget):
             v.setStyleSheet(
                 f"font-size: 30px; font-weight: bold; font-family: Consolas, monospace; color: {COLORS['subtext']};"
             )
+        target = QLabel("")
+        target.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 9px; background: transparent;")
         lay.addWidget(k)
         if hero:
             lay.addStretch()
         lay.addWidget(v)
+        lay.addWidget(target)
         self._cards[key] = v
+        self._targets[key] = target
         return card
 
     def _make_breakdown_table(self, first_col: str) -> QTableWidget:
@@ -408,18 +414,21 @@ class DashboardPanel(QWidget):
                 f"color: {COLORS['subtext']}; font-size: {self._value_font_size(key)}px; "
                 f"font-weight: bold; font-family: Consolas, monospace;"
             )
-        self._donut.set_data(0, 0)
+        for t_lbl in self._targets.values():
+            t_lbl.setText("")
+        self._donut.set_data(0, 0, 0.0)
         self._equity.set_curve([])
         for t in (self._tbl_symbol, self._tbl_direction, self._tbl_source):
             t.setRowCount(0)
         self._clear_insights()
 
     def update_dashboard(self, stats: PerformanceStats, insights: list[Insight]) -> None:
-        self._donut.set_data(stats.wins, stats.losses)
+        self._donut.set_data(stats.wins, stats.losses, stats.breakeven_win_rate)
         self._set_money_card("Net P/L", stats.net_profit)
         self._set_card("Profit Factor", analytics._fmt_pf(stats.profit_factor))
         self._set_money_card("Expectancy", stats.expectancy, suffix=" /trade")
         self._set_card("Trades", f"{stats.total_trades}  ({stats.wins}W/{stats.losses}L)")
+        self._set_targets(stats)
         payoff = "∞" if stats.payoff_ratio == float("inf") else f"{stats.payoff_ratio:.2f}"
         self._set_card("Avg Win / Loss", f"${stats.avg_win:,.0f} / ${stats.avg_loss:,.0f}  ({payoff})")
         self._set_money_card("Max Drawdown", -stats.max_drawdown)
@@ -441,8 +450,49 @@ class DashboardPanel(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
+    _STATUS_COLOR = {
+        "good": COLORS["green"], "warn": COLORS["amber"],
+        "bad": COLORS["red"], "neutral": COLORS["subtext"],
+    }
+
     def _value_font_size(self, key: str) -> int:
         return 30 if key in self._HERO_KEYS else 18
+
+    def _set_target(self, key: str, text: str, status: str = "neutral") -> None:
+        lbl = self._targets[key]
+        lbl.setText("target: " + text if status != "neutral" else text)
+        lbl.setStyleSheet(
+            f"color: {self._STATUS_COLOR[status]}; font-size: 9px; font-weight: bold; background: transparent;"
+        )
+
+    def _set_targets(self, stats: PerformanceStats) -> None:
+        has = stats.total_trades > 0
+
+        def hi(v, good, warn):   # higher is better
+            return "good" if v >= good else ("warn" if v >= warn else "bad")
+
+        def lo(v, good, warn):   # lower is better
+            return "good" if v <= good else ("warn" if v <= warn else "bad")
+
+        def st(status):          # suppress judgment when there's no data
+            return status if has else "neutral"
+
+        self._set_target("Net P/L", "> 0", st("good" if stats.net_profit > 0 else "bad"))
+        self._set_target("Profit Factor", "≥ 1.5", st(hi(stats.profit_factor, 1.5, 1.0)))
+        self._set_target("Expectancy", "> 0 / trade", st("good" if stats.expectancy > 0 else "bad"))
+        self._set_target("Trades", "≥ 30 for confidence", st(hi(stats.total_trades, 30, 10)))
+        self._set_target("Avg Win / Loss", "payoff ≥ 1.5", st(hi(stats.payoff_ratio, 1.5, 1.0)))
+        self._set_target("Max Drawdown", "lower is better", "neutral")
+        self._set_target("Recovery Factor", "≥ 3", st(hi(stats.recovery_factor, 3.0, 1.0)))
+        self._set_target("Largest Win", "higher is better", "neutral")
+        if has and stats.avg_loss > 0:
+            ratio = abs(stats.largest_loss) / stats.avg_loss
+            ll = "good" if ratio <= 3 else ("warn" if ratio <= 5 else "bad")
+        else:
+            ll = "neutral"
+        self._set_target("Largest Loss", "≤ 3× avg loss", ll)
+        self._set_target("Max Loss Streak", "≤ 4 ideal", st(lo(stats.max_consec_losses, 4, 6)))
+        self._set_target("Avg Hold", "—", "neutral")
 
     def _set_card(self, key: str, text: str) -> None:
         lbl = self._cards[key]

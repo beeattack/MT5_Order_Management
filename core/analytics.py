@@ -69,6 +69,7 @@ class PerformanceStats:
     avg_win: float = 0.0
     avg_loss: float = 0.0        # positive magnitude
     payoff_ratio: float = 0.0
+    breakeven_win_rate: float = 0.0   # win rate needed to break even, given payoff
     largest_win: float = 0.0
     largest_loss: float = 0.0    # negative
     max_consec_wins: int = 0
@@ -151,6 +152,8 @@ def compute(entries: list[HistoryEntry]) -> PerformanceStats:
     avg_win = mean(wins_list) if wins_list else 0.0
     avg_loss = (gross_loss / losses) if losses else 0.0
     payoff = (avg_win / avg_loss) if avg_loss > 0 else (math.inf if avg_win > 0 else 0.0)
+    # win rate needed to break even given the payoff: avg_loss / (avg_win + avg_loss)
+    breakeven_wr = (avg_loss / (avg_win + avg_loss) * 100.0) if (avg_win + avg_loss) > 0 else 0.0
 
     # consecutive streaks
     mcw = mcl = cw = cl = 0
@@ -218,6 +221,7 @@ def compute(entries: list[HistoryEntry]) -> PerformanceStats:
         avg_win=avg_win,
         avg_loss=avg_loss,
         payoff_ratio=payoff,
+        breakeven_win_rate=breakeven_wr,
         largest_win=max(profits),
         largest_loss=min(profits),
         max_consec_wins=mcw,
