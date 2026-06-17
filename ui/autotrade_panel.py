@@ -129,7 +129,7 @@ class AutoTradePanel(QWidget):
         self._symbol.setFixedWidth(110)
 
         self._timeframe = QComboBox()
-        self._timeframe.addItems(["H1", "H4"])
+        self._timeframe.addItems(["M30", "H1", "H4"])
         self._timeframe.setCurrentText("H1")
         self._timeframe.setFixedWidth(80)
 

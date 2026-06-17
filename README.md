@@ -109,7 +109,7 @@ These are **descriptive, not predictive** — they summarize what already happen
 
 ## Auto Trade
 
-The **Auto Trade** tab runs an automated trend-pullback strategy on the H1 (1-hour) timeframe (H4 is also selectable).
+The **Auto Trade** tab runs an automated trend-pullback strategy on the H1 (1-hour) timeframe (M30 and H4 are also selectable).
 
 ### Strategy — EMA + RSI pullback
 
