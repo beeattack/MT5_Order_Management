@@ -145,10 +145,78 @@ class EquityCurveWidget(QWidget):
         p.drawPath(path)
 
 
+class DonutChartWidget(QWidget):
+    """Win/loss donut drawn with QPainter; win rate shown large in the center."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._wins = 0
+        self._losses = 0
+        self.setMinimumSize(200, 152)
+
+    def set_data(self, wins: int, losses: int) -> None:
+        self._wins, self._losses = wins, losses
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        p.fillRect(self.rect(), QColor(COLORS["panel"]))
+        p.setPen(QPen(QColor(COLORS["accent"]), 1))
+        p.drawRect(0, 0, w - 1, h - 1)
+
+        thickness = 18
+        diam = max(40, min(w, h) - 38)
+        rx = (w - diam) / 2
+        ry = (h - diam) / 2 - 6
+        ring = QRectF(rx, ry, diam, diam)
+        total = self._wins + self._losses
+
+        # background ring
+        p.setPen(QPen(QColor(COLORS["accent"]), thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
+        p.drawArc(ring, 0, 360 * 16)
+
+        if total == 0:
+            p.setPen(QColor(COLORS["subtext"]))
+            p.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+            p.drawText(ring, Qt.AlignmentFlag.AlignCenter, "—")
+            p.setFont(QFont("Segoe UI", 8))
+            p.drawText(QRectF(0, ry + diam + 4, w, 16), Qt.AlignmentFlag.AlignHCenter, "No trades")
+            return
+
+        wr = self._wins / total * 100.0
+        wins_span = int(round(360 * self._wins / total))
+        start = 90 * 16  # top, going clockwise (negative span)
+        p.setPen(QPen(QColor(COLORS["green"]), thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
+        p.drawArc(ring, start, -wins_span * 16)
+        p.setPen(QPen(QColor(COLORS["red"]), thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap))
+        p.drawArc(ring, start - wins_span * 16, -(360 - wins_span) * 16)
+
+        # center: big win rate %
+        p.setPen(QColor(COLORS["green"] if wr >= 50 else COLORS["red"]))
+        p.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        p.drawText(QRectF(rx, ry + diam / 2 - 28, diam, 34),
+                   Qt.AlignmentFlag.AlignCenter, f"{wr:.0f}%")
+        p.setPen(QColor(COLORS["subtext"]))
+        p.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        p.drawText(QRectF(rx, ry + diam / 2 + 4, diam, 16),
+                   Qt.AlignmentFlag.AlignCenter, "WIN RATE")
+
+        # legend under the ring
+        p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+        p.setPen(QColor(COLORS["green"]))
+        p.drawText(QRectF(0, ry + diam + 4, w / 2, 16), Qt.AlignmentFlag.AlignRight, f"{self._wins} W  ")
+        p.setPen(QColor(COLORS["red"]))
+        p.drawText(QRectF(w / 2, ry + diam + 4, w / 2, 16), Qt.AlignmentFlag.AlignLeft, f"  {self._losses} L")
+
+
 class DashboardPanel(QWidget):
     period_changed = Signal(object, object)   # (from_dt, to_dt) UTC-aware
 
     _PERIODS = ["Today", "1W", "1M", "3M", "YTD", "All"]
+
+    _HERO_KEYS = frozenset({"Net P/L", "Profit Factor", "Expectancy"})
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -203,12 +271,20 @@ class DashboardPanel(QWidget):
         col.setContentsMargins(10, 4, 10, 10)
         col.setSpacing(6)
 
-        # stat cards
+        # hero row: win-rate donut + the three headline metrics
+        hero = QHBoxLayout()
+        hero.setSpacing(8)
+        self._donut = DonutChartWidget()
+        hero.addWidget(self._donut, 0)
+        for key in ("Net P/L", "Profit Factor", "Expectancy"):
+            hero.addWidget(self._make_card(key, hero=True), 1)
+        col.addLayout(hero)
+
+        # secondary stat cards
         self._cards_grid = QGridLayout()
         self._cards_grid.setHorizontalSpacing(8)
         self._cards_grid.setVerticalSpacing(8)
         card_specs = [
-            "Net P/L", "Profit Factor", "Win Rate", "Expectancy",
             "Trades", "Avg Win / Loss", "Max Drawdown", "Recovery Factor",
             "Largest Win", "Largest Loss", "Max Loss Streak", "Avg Hold",
         ]
@@ -247,18 +323,24 @@ class DashboardPanel(QWidget):
         lbl.setObjectName("sectionTitle")
         return lbl
 
-    def _make_card(self, key: str) -> QFrame:
+    def _make_card(self, key: str, hero: bool = False) -> QFrame:
         card = QFrame()
         card.setObjectName("card")
-        card.setMinimumHeight(58)
+        card.setMinimumHeight(96 if hero else 58)
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(10, 6, 10, 6)
-        lay.setSpacing(1)
+        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setSpacing(2)
         k = QLabel(key)
         k.setObjectName("cardKey")
         v = QLabel("—")
         v.setObjectName("cardValue")
+        if hero:
+            v.setStyleSheet(
+                f"font-size: 30px; font-weight: bold; font-family: Consolas, monospace; color: {COLORS['subtext']};"
+            )
         lay.addWidget(k)
+        if hero:
+            lay.addStretch()
         lay.addWidget(v)
         self._cards[key] = v
         return card
@@ -320,18 +402,22 @@ class DashboardPanel(QWidget):
 
     def clear(self) -> None:
         self._snapshot.setText("Connect to view performance")
-        for v in self._cards.values():
+        for key, v in self._cards.items():
             v.setText("—")
-            v.setStyleSheet("font-size: 18px; font-weight: bold; font-family: Consolas, monospace;")
+            v.setStyleSheet(
+                f"color: {COLORS['subtext']}; font-size: {self._value_font_size(key)}px; "
+                f"font-weight: bold; font-family: Consolas, monospace;"
+            )
+        self._donut.set_data(0, 0)
         self._equity.set_curve([])
         for t in (self._tbl_symbol, self._tbl_direction, self._tbl_source):
             t.setRowCount(0)
         self._clear_insights()
 
     def update_dashboard(self, stats: PerformanceStats, insights: list[Insight]) -> None:
+        self._donut.set_data(stats.wins, stats.losses)
         self._set_money_card("Net P/L", stats.net_profit)
         self._set_card("Profit Factor", analytics._fmt_pf(stats.profit_factor))
-        self._set_card("Win Rate", f"{stats.win_rate:.1f}%")
         self._set_money_card("Expectancy", stats.expectancy, suffix=" /trade")
         self._set_card("Trades", f"{stats.total_trades}  ({stats.wins}W/{stats.losses}L)")
         payoff = "∞" if stats.payoff_ratio == float("inf") else f"{stats.payoff_ratio:.2f}"
@@ -355,20 +441,26 @@ class DashboardPanel(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
+    def _value_font_size(self, key: str) -> int:
+        return 30 if key in self._HERO_KEYS else 18
+
     def _set_card(self, key: str, text: str) -> None:
         lbl = self._cards[key]
         lbl.setText(text)
         lbl.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 18px; font-weight: bold; font-family: Consolas, monospace;"
+            f"color: {COLORS['text']}; font-size: {self._value_font_size(key)}px; "
+            f"font-weight: bold; font-family: Consolas, monospace;"
         )
 
     def _set_money_card(self, key: str, value: float, suffix: str = "") -> None:
         lbl = self._cards[key]
         sign = "+" if value >= 0 else ""
+        arrow = " ▲" if value > 0 else (" ▼" if value < 0 else "")
         color = COLORS["green"] if value >= 0 else COLORS["red"]
-        lbl.setText(f"{sign}${value:,.2f}{suffix}")
+        lbl.setText(f"{sign}${value:,.2f}{suffix}{arrow}")
         lbl.setStyleSheet(
-            f"color: {color}; font-size: 18px; font-weight: bold; font-family: Consolas, monospace;"
+            f"color: {color}; font-size: {self._value_font_size(key)}px; "
+            f"font-weight: bold; font-family: Consolas, monospace;"
         )
 
     def _fill_breakdown(self, table: QTableWidget, groups) -> None:
@@ -399,30 +491,48 @@ class DashboardPanel(QWidget):
 
     def _render_insights(self, insights: list[Insight]) -> None:
         self._clear_insights()
-        for ins in insights:
-            color = _SEVERITY_COLOR.get(ins.severity, COLORS["subtext"])
-            card = QFrame()
-            card.setObjectName("insight")
-            card.setStyleSheet(
-                f"QFrame#insight {{ background-color: {COLORS['panel']}; border-radius: 6px; "
-                f"border-left: 4px solid {color}; }}"
+        for idx, ins in enumerate(insights):
+            self._insights_box.addWidget(self._make_insight_card(ins, hero=(idx == 0)))
+
+    def _make_insight_card(self, ins: Insight, hero: bool) -> QFrame:
+        color = _SEVERITY_COLOR.get(ins.severity, COLORS["subtext"])
+        bg = COLORS["row_alt"] if hero else COLORS["panel"]
+        border = 6 if hero else 4
+        card = QFrame()
+        card.setObjectName("insight")
+        card.setStyleSheet(
+            f"QFrame#insight {{ background-color: {bg}; border-radius: 6px; "
+            f"border-left: {border}px solid {color}; }}"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(14, 9 if hero else 7, 14, 9 if hero else 7)
+        lay.setSpacing(3 if hero else 2)
+
+        if hero:
+            tag = QLabel("★  KEY TAKEAWAY")
+            tag.setStyleSheet(
+                f"color: {color}; font-size: 10px; font-weight: bold; letter-spacing: 1px; background: transparent;"
             )
-            lay = QVBoxLayout(card)
-            lay.setContentsMargins(12, 7, 12, 7)
-            lay.setSpacing(2)
+            lay.addWidget(tag)
 
-            title = QLabel(ins.title)
-            title.setStyleSheet(f"color: {color}; font-size: 12px; font-weight: bold; background: transparent;")
-            lay.addWidget(title)
+        title = QLabel(ins.title)
+        title.setWordWrap(True)
+        title.setStyleSheet(
+            f"color: {color}; font-size: {15 if hero else 12}px; font-weight: bold; background: transparent;"
+        )
+        lay.addWidget(title)
 
-            finding = QLabel(ins.finding)
-            finding.setWordWrap(True)
-            finding.setStyleSheet(f"color: {COLORS['text']}; font-size: 11px; background: transparent;")
-            lay.addWidget(finding)
+        finding = QLabel(ins.finding)
+        finding.setWordWrap(True)
+        finding.setStyleSheet(
+            f"color: {COLORS['text']}; font-size: {12 if hero else 11}px; background: transparent;"
+        )
+        lay.addWidget(finding)
 
-            suggestion = QLabel("→ " + ins.suggestion)
-            suggestion.setWordWrap(True)
-            suggestion.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 11px; background: transparent;")
-            lay.addWidget(suggestion)
-
-            self._insights_box.addWidget(card)
+        suggestion = QLabel("→ " + ins.suggestion)
+        suggestion.setWordWrap(True)
+        suggestion.setStyleSheet(
+            f"color: {COLORS['subtext']}; font-size: {12 if hero else 11}px; background: transparent;"
+        )
+        lay.addWidget(suggestion)
+        return card
