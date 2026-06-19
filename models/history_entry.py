@@ -17,3 +17,4 @@ class HistoryEntry:
     digits: int = 2     # price decimal places from symbol_info
     is_auto: bool = False   # opened by the auto-trader (magic == AUTO_TRADE_MAGIC)
     position_id: int = 0    # MT5 position the closing deal belongs to
+    close_reason: str = ""  # how it closed: TP / SL / SO / EXPERT / MANUAL / OTHER

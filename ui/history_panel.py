@@ -28,9 +28,20 @@ COLORS = {
     "row_alt":   "#1e2a4a",
 }
 
-_COLUMNS = ["Ticket", "Symbol", "Type", "Volume",
+_COLUMNS = ["Ticket", "Symbol", "Type", "Exit", "Volume",
             "Open Price", "Close Price", "Profit",
             "Open Time", "Close Time"]
+_COL = {name: i for i, name in enumerate(_COLUMNS)}
+
+# Closing-type mark: label, color, tooltip
+_EXIT_DISPLAY = {
+    "TP":     ("TP",     COLORS["green"],   "Take profit hit"),
+    "SL":     ("SL",     COLORS["red"],     "Stop loss hit"),
+    "MANUAL": ("Manual", COLORS["subtext"], "Manual close"),
+    "EXPERT": ("EA",     COLORS["amber"],   "Closed by Expert Advisor"),
+    "SO":     ("SO",     COLORS["red"],     "Stop out / margin call"),
+    "OTHER":  ("—",      COLORS["subtext"], "Other / rollover"),
+}
 
 _PANEL_QSS = f"""
 QWidget {{
@@ -285,15 +296,19 @@ class HistoryPanel(QWidget):
         self._table.setFont(QFont("Consolas", 11))
 
         hh = self._table.horizontalHeader()
-        col_widths = [80, 90, 60, 70, 95, 95, 90, 150, 150]
-        for col_idx, width in enumerate(col_widths):
-            if col_idx == len(_COLUMNS) - 1:
+        col_widths = {
+            "Ticket": 80, "Symbol": 90, "Type": 60, "Exit": 82, "Volume": 70,
+            "Open Price": 95, "Close Price": 95, "Profit": 90,
+            "Open Time": 150, "Close Time": 150,
+        }
+        for col_idx, name in enumerate(_COLUMNS):
+            if name == "Close Time":
                 hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Stretch)
-            elif col_idx == 0:  # Ticket — fit content
+            elif name == "Ticket":  # fit content
                 hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.ResizeToContents)
             else:
                 hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
-                self._table.setColumnWidth(col_idx, width)
+                self._table.setColumnWidth(col_idx, col_widths[name])
 
         layout.addWidget(self._table)
 
@@ -364,22 +379,24 @@ class HistoryPanel(QWidget):
         self._table.setRowCount(len(entries))
 
         for row, entry in enumerate(entries):
-            self._set_item(row, 0, str(entry.ticket))
+            self._set_item(row, _COL["Ticket"], str(entry.ticket))
 
             sym_item = QTableWidgetItem(f"{source_icon(entry.is_auto)}  {entry.symbol}")
             sym_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             sym_item.setToolTip(source_label(entry.is_auto))
-            self._table.setItem(row, 1, sym_item)
+            self._table.setItem(row, _COL["Symbol"], sym_item)
 
             type_item = QTableWidgetItem(entry.order_type)
             type_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             type_color = QColor(COLORS["green"]) if entry.order_type == "BUY" else QColor(COLORS["red"])
             type_item.setForeground(type_color)
-            self._table.setItem(row, 2, type_item)
+            self._table.setItem(row, _COL["Type"], type_item)
 
-            self._set_item(row, 3, f"{entry.volume:.2f}", align_right=True)
-            self._set_item(row, 4, f"{entry.open_price:,.{entry.digits}f}", align_right=True)
-            self._set_item(row, 5, f"{entry.close_price:,.{entry.digits}f}", align_right=True)
+            self._set_exit_item(row, entry.close_reason)
+
+            self._set_item(row, _COL["Volume"], f"{entry.volume:.2f}", align_right=True)
+            self._set_item(row, _COL["Open Price"], f"{entry.open_price:,.{entry.digits}f}", align_right=True)
+            self._set_item(row, _COL["Close Price"], f"{entry.close_price:,.{entry.digits}f}", align_right=True)
 
             profit_sign  = "+" if entry.profit >= 0 else ""
             profit_item  = QTableWidgetItem(f"{profit_sign}{entry.profit:,.2f}")
@@ -387,12 +404,12 @@ class HistoryPanel(QWidget):
             profit_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             profit_color = QColor(COLORS["green"]) if entry.profit >= 0 else QColor(COLORS["red"])
             profit_item.setForeground(profit_color)
-            self._table.setItem(row, 6, profit_item)
+            self._table.setItem(row, _COL["Profit"], profit_item)
 
-            self._set_item(row, 7, format_dt(entry.open_time,  self._tz_name))
-            self._set_item(row, 8, format_dt(entry.close_time, self._tz_name))
+            self._set_item(row, _COL["Open Time"], format_dt(entry.open_time,  self._tz_name))
+            self._set_item(row, _COL["Close Time"], format_dt(entry.close_time, self._tz_name))
 
-        self._table.resizeColumnToContents(0)
+        self._table.resizeColumnToContents(_COL["Ticket"])
 
         # Summary bar
         net = summary.get("net_profit", 0.0)
@@ -419,3 +436,15 @@ class HistoryPanel(QWidget):
         if align_right:
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._table.setItem(row, col, item)
+
+    def _set_exit_item(self, row: int, reason: str) -> None:
+        label, color, tip = _EXIT_DISPLAY.get(reason or "OTHER", _EXIT_DISPLAY["OTHER"])
+        item = QTableWidgetItem(label)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setForeground(QColor(color))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont("Consolas", 11)
+        font.setBold(reason in ("TP", "SL", "SO"))
+        item.setFont(font)
+        item.setToolTip(tip)
+        self._table.setItem(row, _COL["Exit"], item)

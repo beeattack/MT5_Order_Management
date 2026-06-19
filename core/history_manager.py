@@ -13,6 +13,19 @@ except ImportError:
     mt5 = None  # type: ignore[assignment]
     MT5_AVAILABLE = False
 
+# Map an MT5 closing-deal reason code to a display category
+_REASON_CATEGORY: dict[int, str] = {}
+if MT5_AVAILABLE:
+    _REASON_CATEGORY = {
+        getattr(mt5, "DEAL_REASON_SL", 4): "SL",
+        getattr(mt5, "DEAL_REASON_TP", 5): "TP",
+        getattr(mt5, "DEAL_REASON_SO", 6): "SO",
+        getattr(mt5, "DEAL_REASON_EXPERT", 3): "EXPERT",
+        getattr(mt5, "DEAL_REASON_CLIENT", 0): "MANUAL",
+        getattr(mt5, "DEAL_REASON_MOBILE", 1): "MANUAL",
+        getattr(mt5, "DEAL_REASON_WEB", 2): "MANUAL",
+    }
+
 
 class HistoryManager:
     def __init__(self) -> None:
@@ -99,6 +112,7 @@ class HistoryManager:
                 digits=self._symbol_digits(deal.symbol),
                 is_auto=(entry_magic == AUTO_TRADE_MAGIC),
                 position_id=deal.position_id,
+                close_reason=_REASON_CATEGORY.get(getattr(deal, "reason", -1), "OTHER"),
             ))
 
         # Sort newest first
