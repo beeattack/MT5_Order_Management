@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSizeGrip,
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
@@ -27,10 +27,15 @@ MIN_OPACITY_PCT = 30
 DEFAULT_OPACITY_PCT = 92
 
 
-def _make_x_icon(size: int = 14, color: str = "#ffffff") -> QIcon:
-    """A crisp X drawn with QPainter (reliable at small sizes, unlike a glyph)."""
+def _blank_pixmap(size: int) -> QPixmap:
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
+    return pm
+
+
+def _make_x_icon(size: int = 14, color: str = "#ffffff") -> QIcon:
+    """A crisp X drawn with QPainter (reliable at small sizes, unlike a glyph)."""
+    pm = _blank_pixmap(size)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(QPen(QColor(color), 2))
@@ -40,8 +45,30 @@ def _make_x_icon(size: int = 14, color: str = "#ffffff") -> QIcon:
     p.end()
     return QIcon(pm)
 
+
+def _make_compact_icon(size: int = 14, color: str = "#eaeaea") -> QIcon:
+    """Stacked rows — represents the compact orders view."""
+    pm = _blank_pixmap(size)
+    p = QPainter(pm)
+    p.setPen(QPen(QColor(color), 1.6))
+    for y in (4, 7, 10):
+        p.drawLine(3, y, size - 3, y)
+    p.end()
+    return QIcon(pm)
+
+
+def _make_normal_icon(size: int = 14, color: str = "#eaeaea") -> QIcon:
+    """A framed window — represents the full normal window."""
+    pm = _blank_pixmap(size)
+    p = QPainter(pm)
+    p.setPen(QPen(QColor(color), 1.4))
+    p.drawRect(3, 3, size - 7, size - 7)
+    p.drawLine(3, 6, size - 4, 6)   # title bar
+    p.end()
+    return QIcon(pm)
+
 _PANEL_QSS = f"""
-QWidget#GhostPanel {{ background-color: {COLORS['bg']}; }}
+QWidget#GhostPanel {{ background-color: {COLORS['bg']}; border: 1px solid {COLORS['accent']}; }}
 QLabel#ghostTotalKey {{ color: {COLORS['subtext']}; font-size: 10px; font-weight: bold; }}
 QLabel#ghostTotal    {{ font-size: 14px; font-weight: bold; font-family: Consolas, monospace; }}
 QLabel#ghostHint {{ color: {COLORS['subtext']}; font-size: 10px; }}
@@ -81,6 +108,7 @@ class GhostPanel(QWidget):
         self.setObjectName("GhostPanel")
         self.setStyleSheet(_PANEL_QSS)
         self._x_icon = _make_x_icon()
+        self._drag_pos = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -99,17 +127,37 @@ class GhostPanel(QWidget):
         header.addWidget(self._total)
         header.addStretch()
 
-        compact_btn = QPushButton("Compact")
+        compact_btn = QPushButton()
         compact_btn.setObjectName("modeBtn")
+        compact_btn.setIcon(_make_compact_icon())
+        compact_btn.setIconSize(QSize(14, 14))
+        compact_btn.setFixedSize(26, 22)
+        compact_btn.setToolTip("Compact mode")
         compact_btn.clicked.connect(self.switch_compact)
         header.addWidget(compact_btn)
 
-        normal_btn = QPushButton("Normal")
+        normal_btn = QPushButton()
         normal_btn.setObjectName("modeBtn")
+        normal_btn.setIcon(_make_normal_icon())
+        normal_btn.setIconSize(QSize(14, 14))
+        normal_btn.setFixedSize(26, 22)
+        normal_btn.setToolTip("Normal mode")
         normal_btn.clicked.connect(self.switch_normal)
         header.addWidget(normal_btn)
 
         layout.addLayout(header)
+
+        # Balance / Equity line
+        acct = QHBoxLayout()
+        acct.setSpacing(12)
+        self._bal_lbl = QLabel("Bal —")
+        self._bal_lbl.setObjectName("ghostHint")
+        self._eq_lbl = QLabel("Eq —")
+        self._eq_lbl.setObjectName("ghostHint")
+        acct.addWidget(self._bal_lbl)
+        acct.addWidget(self._eq_lbl)
+        acct.addStretch()
+        layout.addLayout(acct)
 
         # Transparency slider row
         opacity_row = QHBoxLayout()
@@ -150,6 +198,13 @@ class GhostPanel(QWidget):
         self._table.setColumnWidth(2, 30)
         layout.addWidget(self._table)
 
+        # Bottom resize grip (width is fixed by the window, so this resizes height)
+        grip_row = QHBoxLayout()
+        grip_row.setContentsMargins(0, 0, 0, 0)
+        grip_row.addStretch()
+        grip_row.addWidget(QSizeGrip(self))
+        layout.addLayout(grip_row)
+
     def _on_opacity(self, value: int) -> None:
         self._opacity_lbl.setText(f"{value}%")
         self.opacity_changed.emit(value / 100.0)
@@ -184,10 +239,29 @@ class GhostPanel(QWidget):
             btn.clicked.connect(lambda _=False, t=order.ticket: self.close_order_requested.emit(t))
             self._table.setCellWidget(row, 2, btn)
 
-    def update_total(self, profit: float) -> None:
+    def update_account(self, balance: float, equity: float, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
         color = COLORS["green"] if profit >= 0 else COLORS["red"]
         self._total.setText(f"{sign}${profit:,.2f}")
         self._total.setStyleSheet(
             f"color: {color}; font-size: 14px; font-weight: bold; font-family: Consolas, monospace;"
         )
+        self._bal_lbl.setText(f"Bal ${balance:,.2f}")
+        self._eq_lbl.setText(f"Eq ${equity:,.2f}")
+
+    # ------------------------------------------------------------------
+    # Drag-to-move (frameless ghost window)
+    # ------------------------------------------------------------------
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_pos is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+            self.window().move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_pos = None

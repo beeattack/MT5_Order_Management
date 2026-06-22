@@ -431,7 +431,7 @@ class MainWindow(QMainWindow):
         self._conn_panel.set_state_detected()
         self._orders_panel.update_orders([])
         self._ghost_panel.update_orders([])
-        self._ghost_panel.update_total(0.0)
+        self._ghost_panel.update_account(0.0, 0.0, 0.0)
         self._history_panel.clear()
         self._dashboard_panel.clear()
         self._detection_timer.start()
@@ -651,7 +651,7 @@ class MainWindow(QMainWindow):
             if self._compact_mode:
                 self._orders_panel.update_compact_stats(equity, profit)
             elif self._mode == "ghost":
-                self._ghost_panel.update_total(profit)
+                self._ghost_panel.update_account(balance, equity, profit)
 
     def _check_mt5_status(self) -> None:
         if self._connected:
@@ -719,13 +719,17 @@ class MainWindow(QMainWindow):
             self.setMinimumHeight(198)
             self.setMaximumHeight(16777215)
             self.resize(compact_w, 260)
-        else:  # ghost — minimal translucent floating overlay
+        else:  # ghost — frameless, translucent, always-on-top floating overlay
             self.setWindowOpacity(self._ghost_opacity)
-            self.setWindowFlags(base | Qt.WindowType.WindowStaysOnTopHint)
+            self.setWindowFlags(
+                Qt.WindowType.Window
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.WindowStaysOnTopHint
+            )
             self.show()
             ghost_w = self._ghost_panel.CONTENT_WIDTH
-            self.setFixedWidth(ghost_w)
-            self.setMinimumHeight(120)
+            self.setFixedWidth(ghost_w)              # lock width; grip resizes height only
+            self.setMinimumHeight(150)
             self.setMaximumHeight(16777215)
-            self.resize(ghost_w, 240)
+            self.resize(ghost_w, 260)
             self._refresh_orders()   # populate immediately
