@@ -22,7 +22,7 @@ except ImportError:
     mt5 = None  # type: ignore[assignment]
     MT5_AVAILABLE = False
 
-TIMEFRAMES = ["M1", "M5", "M30", "H1", "H4"]
+TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4"]
 DEFAULT_TIMEFRAME = "H1"
 
 _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".mt5_order_manager")
