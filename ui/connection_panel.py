@@ -94,6 +94,7 @@ class ConnectionPanel(QWidget):
     connect_requested    = Signal()
     disconnect_requested = Signal()
     display_mode_toggled = Signal()
+    ghost_requested      = Signal()
     timezone_changed     = Signal(str)   # emits IANA timezone name
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -179,6 +180,12 @@ class ConnectionPanel(QWidget):
         self._mode_btn.setFixedWidth(82)
         self._mode_btn.clicked.connect(self.display_mode_toggled)
         layout.addWidget(self._mode_btn)
+
+        # Ghost (floating minimal overlay) button
+        self._ghost_btn = QPushButton("Ghost")
+        self._ghost_btn.setFixedWidth(70)
+        self._ghost_btn.clicked.connect(self.ghost_requested)
+        layout.addWidget(self._ghost_btn)
 
     def _make_stat_block(self, key: str, attr: str) -> QHBoxLayout:
         block = QHBoxLayout()

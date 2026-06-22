@@ -18,6 +18,7 @@ from ui.history_panel    import HistoryPanel
 from ui.autotrade_panel  import AutoTradePanel
 from ui.dashboard_panel  import DashboardPanel
 from ui.watchlist_panel  import WatchlistPanel
+from ui.ghost_panel      import GhostPanel
 
 from core.auto_trader import AutoTrader
 from core.watchlist import WatchlistMonitor, market_watch_symbols
@@ -208,7 +209,9 @@ class MainWindow(QMainWindow):
         self.history_mgr = history_mgr
 
         self._connected = False
+        self._mode = "normal"        # "normal" | "compact" | "ghost"
         self._compact_mode = False
+        self._ghost_opacity = 0.92   # window opacity used in ghost mode
 
         self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         self.resize(1200, 700)
@@ -261,6 +264,7 @@ class MainWindow(QMainWindow):
         self._conn_panel.connect_requested.connect(self._on_connect)
         self._conn_panel.disconnect_requested.connect(self._on_disconnect)
         self._conn_panel.display_mode_toggled.connect(self._toggle_display_mode)
+        self._conn_panel.ghost_requested.connect(lambda: self._apply_mode("ghost"))
         self._conn_panel.timezone_changed.connect(self._on_timezone_changed)
         layout.addWidget(self._conn_panel)
 
@@ -301,6 +305,15 @@ class MainWindow(QMainWindow):
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
         layout.addWidget(self._tabs)
+
+        # Ghost mode overlay — hidden until activated
+        self._ghost_panel = GhostPanel()
+        self._ghost_panel.switch_normal.connect(lambda: self._apply_mode("normal"))
+        self._ghost_panel.switch_compact.connect(lambda: self._apply_mode("compact"))
+        self._ghost_panel.close_order_requested.connect(lambda t: self._on_close_order(t, 100.0))
+        self._ghost_panel.opacity_changed.connect(self._on_ghost_opacity)
+        self._ghost_panel.setVisible(False)
+        layout.addWidget(self._ghost_panel)
 
     def _build_menu(self) -> None:
         help_menu = self.menuBar().addMenu("Help")
@@ -417,6 +430,8 @@ class MainWindow(QMainWindow):
         self._connected = False
         self._conn_panel.set_state_detected()
         self._orders_panel.update_orders([])
+        self._ghost_panel.update_orders([])
+        self._ghost_panel.update_total(0.0)
         self._history_panel.clear()
         self._dashboard_panel.clear()
         self._detection_timer.start()
@@ -624,6 +639,8 @@ class MainWindow(QMainWindow):
             return
         orders = self.order_mgr.get_open_orders()
         self._orders_panel.update_orders(orders)
+        if self._mode == "ghost":
+            self._ghost_panel.update_orders(orders)
         account_info = self.connector.get_account_info()
         if account_info:
             balance = account_info.get("balance", 0.0)
@@ -633,6 +650,8 @@ class MainWindow(QMainWindow):
             self._dashboard_panel.update_account(balance, equity, profit, len(orders))
             if self._compact_mode:
                 self._orders_panel.update_compact_stats(equity, profit)
+            elif self._mode == "ghost":
+                self._ghost_panel.update_total(profit)
 
     def _check_mt5_status(self) -> None:
         if self._connected:
@@ -645,51 +664,68 @@ class MainWindow(QMainWindow):
             self._conn_panel.set_state_not_found()
 
     # ------------------------------------------------------------------
-    # Display mode toggle (Normal ↔ Compact)
+    # Display modes: Normal ↔ Compact ↔ Ghost
     # ------------------------------------------------------------------
 
     def _toggle_display_mode(self) -> None:
-        self._compact_mode = not self._compact_mode
-        compact = self._compact_mode
+        # Connection-panel button toggles between Normal and Compact
+        self._apply_mode("compact" if self._mode == "normal" else "normal")
 
-        self._conn_panel.set_compact_layout(compact)
-        self._orders_panel.set_compact_mode(compact)
+    def _on_ghost_opacity(self, opacity: float) -> None:
+        self._ghost_opacity = opacity
+        if self._mode == "ghost":
+            self.setWindowOpacity(opacity)
 
-        # Hide menu and tab bar, lock to the orders table in compact mode
-        self.menuBar().setVisible(not compact)
-        self._tabs.tabBar().setVisible(not compact)
-        if compact:
-            self._tabs.setCurrentWidget(self._orders_panel)
+    def _apply_mode(self, mode: str) -> None:
+        self._mode = mode
+        compact = mode == "compact"
+        ghost = mode == "ghost"
+        self._compact_mode = compact
 
-        if compact:
-            # Remove size constraints before setting new flags so resize isn't clamped
-            self.setMinimumSize(0, 0)
-            self.setMaximumSize(16777215, 16777215)
-            self.setWindowFlags(
-                Qt.WindowType.Window |
-                Qt.WindowType.WindowTitleHint |
-                Qt.WindowType.WindowSystemMenuHint |
-                Qt.WindowType.WindowCloseButtonHint |
-                Qt.WindowType.WindowMinimizeButtonHint |
-                Qt.WindowType.WindowStaysOnTopHint
-            )
+        # Content visibility
+        self.menuBar().setVisible(mode == "normal")
+        self._conn_panel.setVisible(not ghost)
+        self._tabs.setVisible(not ghost)
+        self._ghost_panel.setVisible(ghost)
+
+        if not ghost:
+            self._conn_panel.set_compact_layout(compact)
+            self._orders_panel.set_compact_mode(compact)
+            self._tabs.tabBar().setVisible(not compact)
+            if compact:
+                self._tabs.setCurrentWidget(self._orders_panel)
+
+        # Clear any fixed-size constraints before changing window flags
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+
+        base = (Qt.WindowType.Window | Qt.WindowType.WindowTitleHint |
+                Qt.WindowType.WindowSystemMenuHint | Qt.WindowType.WindowCloseButtonHint)
+
+        if mode == "normal":
+            self.setWindowOpacity(1.0)
+            self.setWindowFlags(base | Qt.WindowType.WindowMinMaxButtonsHint)
             self.show()
-            # Lock width exactly to content, allow height resize only
+            self.setMinimumSize(900, 500)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(1200, 700)
+        elif compact:
+            self.setWindowOpacity(1.0)
+            self.setWindowFlags(base | Qt.WindowType.WindowMinimizeButtonHint |
+                                Qt.WindowType.WindowStaysOnTopHint)
+            self.show()
             compact_w = self._orders_panel.COMPACT_CONTENT_WIDTH + 18
             self.setFixedWidth(compact_w)
             self.setMinimumHeight(198)
             self.setMaximumHeight(16777215)
             self.resize(compact_w, 260)
-        else:
-            self.setWindowFlags(
-                Qt.WindowType.Window |
-                Qt.WindowType.WindowTitleHint |
-                Qt.WindowType.WindowSystemMenuHint |
-                Qt.WindowType.WindowCloseButtonHint |
-                Qt.WindowType.WindowMinMaxButtonsHint
-            )
+        else:  # ghost — minimal translucent floating overlay
+            self.setWindowOpacity(self._ghost_opacity)
+            self.setWindowFlags(base | Qt.WindowType.WindowStaysOnTopHint)
             self.show()
-            # Restore full free resizing in normal mode
-            self.setMinimumSize(900, 500)
-            self.setMaximumSize(16777215, 16777215)
-            self.resize(1200, 700)
+            ghost_w = self._ghost_panel.CONTENT_WIDTH
+            self.setFixedWidth(ghost_w)
+            self.setMinimumHeight(120)
+            self.setMaximumHeight(16777215)
+            self.resize(ghost_w, 240)
+            self._refresh_orders()   # populate immediately
