@@ -101,7 +101,7 @@ class GhostPanel(QWidget):
     close_order_requested = Signal(int)   # ticket (closes 100%)
     opacity_changed      = Signal(float)  # window opacity 0.30–1.00
 
-    CONTENT_WIDTH = 280
+    CONTENT_WIDTH = 300
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -180,8 +180,8 @@ class GhostPanel(QWidget):
 
         layout.addLayout(opacity_row)
 
-        self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Symbol", "P/L", ""])
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["Symbol", "Type", "Vol", "P/L", ""])
         self._table.horizontalHeader().setVisible(False)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
@@ -191,11 +191,13 @@ class GhostPanel(QWidget):
         self._table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._table.setFont(QFont("Consolas", 11))
         hh = self._table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(1, 86)
-        self._table.setColumnWidth(2, 30)
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)   # Symbol
+        for col in (1, 2, 3, 4):
+            hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(1, 42)    # Type
+        self._table.setColumnWidth(2, 48)    # Volume
+        self._table.setColumnWidth(3, 74)    # P/L
+        self._table.setColumnWidth(4, 28)    # close
         layout.addWidget(self._table)
 
         # Bottom resize grip (width is fixed by the window, so this resizes height)
@@ -220,12 +222,23 @@ class GhostPanel(QWidget):
             sym.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self._table.setItem(row, 0, sym)
 
+            typ = QTableWidgetItem(order.order_type)
+            typ.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            typ.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            typ.setForeground(QColor(COLORS["green"] if order.order_type == "BUY" else COLORS["red"]))
+            self._table.setItem(row, 1, typ)
+
+            vol = QTableWidgetItem(f"{order.volume:.2f}")
+            vol.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            vol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._table.setItem(row, 2, vol)
+
             sign = "+" if order.profit >= 0 else ""
             pl = QTableWidgetItem(f"{sign}{order.profit:,.2f}")
             pl.setFlags(Qt.ItemFlag.ItemIsEnabled)
             pl.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             pl.setForeground(QColor(COLORS["green"] if order.profit >= 0 else COLORS["red"]))
-            self._table.setItem(row, 1, pl)
+            self._table.setItem(row, 3, pl)
 
             btn = QPushButton()
             btn.setIcon(self._x_icon)
@@ -237,7 +250,7 @@ class GhostPanel(QWidget):
                 f"QPushButton:hover {{ background-color: #c0392b; }}"
             )
             btn.clicked.connect(lambda _=False, t=order.ticket: self.close_order_requested.emit(t))
-            self._table.setCellWidget(row, 2, btn)
+            self._table.setCellWidget(row, 4, btn)
 
     def update_account(self, balance: float, equity: float, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
