@@ -109,6 +109,7 @@ class GhostPanel(QWidget):
         self.setStyleSheet(_PANEL_QSS)
         self._x_icon = _make_x_icon()
         self._drag_pos = None
+        self._tickets: list[int] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -216,6 +217,16 @@ class GhostPanel(QWidget):
     # ------------------------------------------------------------------
 
     def update_orders(self, orders: list[Order]) -> None:
+        new_tickets = [o.ticket for o in orders]
+        if new_tickets == self._tickets:
+            # Same orders — refresh only the live P/L; keep the close buttons
+            # intact so a click isn't interrupted by the 100ms rebuild
+            for row, order in enumerate(orders):
+                self._set_pl(row, order.profit)
+            return
+
+        self._tickets = new_tickets
+        self._table.setRowCount(0)
         self._table.setRowCount(len(orders))
         for row, order in enumerate(orders):
             sym = QTableWidgetItem(order.symbol)
@@ -233,12 +244,7 @@ class GhostPanel(QWidget):
             vol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self._table.setItem(row, 2, vol)
 
-            sign = "+" if order.profit >= 0 else ""
-            pl = QTableWidgetItem(f"{sign}{order.profit:,.2f}")
-            pl.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            pl.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            pl.setForeground(QColor(COLORS["green"] if order.profit >= 0 else COLORS["red"]))
-            self._table.setItem(row, 3, pl)
+            self._set_pl(row, order.profit)
 
             btn = QPushButton()
             btn.setIcon(self._x_icon)
@@ -251,6 +257,14 @@ class GhostPanel(QWidget):
             )
             btn.clicked.connect(lambda _=False, t=order.ticket: self.close_order_requested.emit(t))
             self._table.setCellWidget(row, 4, btn)
+
+    def _set_pl(self, row: int, profit: float) -> None:
+        sign = "+" if profit >= 0 else ""
+        item = QTableWidgetItem(f"{sign}{profit:,.2f}")
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item.setForeground(QColor(COLORS["green"] if profit >= 0 else COLORS["red"]))
+        self._table.setItem(row, 3, item)
 
     def update_account(self, balance: float, equity: float, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
