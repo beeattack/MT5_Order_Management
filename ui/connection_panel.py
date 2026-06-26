@@ -221,6 +221,13 @@ class ConnectionPanel(QWidget):
     def selected_tz(self) -> str:
         return TIMEZONE_OPTIONS[self._tz_combo.currentIndex()][1]
 
+    def set_selected_tz(self, iana: str) -> None:
+        """Select the combo entry for the given IANA name (restored from settings)."""
+        for i, (_, name) in enumerate(TIMEZONE_OPTIONS):
+            if name == iana:
+                self._tz_combo.setCurrentIndex(i)
+                return
+
     # ------------------------------------------------------------------
     # State helpers (called from MainWindow)
     # ------------------------------------------------------------------

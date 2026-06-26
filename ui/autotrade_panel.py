@@ -259,6 +259,33 @@ class AutoTradePanel(QWidget):
         else:
             self.start_requested.emit(self.config())
 
+    def load_config(self, cfg: dict) -> None:
+        """Restore previously-saved field values (called once at startup)."""
+        if not cfg:
+            return
+        if cfg.get("symbol"):
+            self._symbol.setText(str(cfg["symbol"]))
+        if cfg.get("timeframe"):
+            self._timeframe.setCurrentText(str(cfg["timeframe"]))
+        if cfg.get("mode") in ("PAPER", "LIVE"):
+            self._mode.setCurrentText(cfg["mode"])
+        spin_map = {
+            "risk_pct": self._risk,
+            "max_positions": self._max_positions,
+            "daily_loss_pct": self._daily_loss,
+            "daily_profit_pct": self._daily_profit,
+            "time_stop": self._time_stop,
+            "max_spread_frac": self._max_spread,
+            "session_start": self._session_start,
+            "session_end": self._session_end,
+        }
+        for key, widget in spin_map.items():
+            if key in cfg and cfg[key] is not None:
+                try:
+                    widget.setValue(type(widget.value())(cfg[key]))
+                except (TypeError, ValueError):
+                    pass
+
     def config(self) -> dict:
         return {
             "symbol": self._symbol.text(),

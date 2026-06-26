@@ -212,6 +212,11 @@ class GhostPanel(QWidget):
         self._opacity_lbl.setText(f"{value}%")
         self.opacity_changed.emit(value / 100.0)
 
+    def set_opacity_pct(self, pct: int) -> None:
+        """Restore the saved opacity (updates slider, label and window)."""
+        pct = max(MIN_OPACITY_PCT, min(100, int(pct)))
+        self._opacity_slider.setValue(pct)
+
     # ------------------------------------------------------------------
     # Public update API
     # ------------------------------------------------------------------

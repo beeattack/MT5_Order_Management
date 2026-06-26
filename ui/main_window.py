@@ -22,6 +22,7 @@ from ui.ghost_panel      import GhostPanel
 
 from core.auto_trader import AutoTrader
 from core.watchlist import WatchlistMonitor, market_watch_symbols
+from core.settings_store import SettingsStore
 from core import analytics
 from core import mt5_alert_bridge
 from utils.sound import play_alert
@@ -208,10 +209,15 @@ class MainWindow(QMainWindow):
         self.order_mgr   = order_mgr
         self.history_mgr = history_mgr
 
+        self.settings = SettingsStore()
+
         self._connected = False
         self._mode = "normal"        # "normal" | "compact" | "ghost"
         self._compact_mode = False
-        self._ghost_opacity = 0.92   # window opacity used in ghost mode
+        ghost_opacity_pct = int(self.settings.get("ghost_opacity_pct", 92))
+        self._ghost_opacity = ghost_opacity_pct / 100.0   # window opacity used in ghost mode
+        # Last height the user resized the ghost overlay to; reused on re-entry.
+        self._ghost_height = max(150, int(self.settings.get("ghost_height", 260)))
 
         self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         self.resize(1200, 700)
@@ -219,6 +225,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(_GLOBAL_QSS)
 
         self._build_ui()
+        self._restore_settings()
 
         self.auto_trader = AutoTrader(
             self.order_mgr,
@@ -314,6 +321,16 @@ class MainWindow(QMainWindow):
         self._ghost_panel.opacity_changed.connect(self._on_ghost_opacity)
         self._ghost_panel.setVisible(False)
         layout.addWidget(self._ghost_panel)
+
+    def _restore_settings(self) -> None:
+        """Apply persisted settings to the freshly-built widgets."""
+        saved_tz = self.settings.get("timezone")
+        if saved_tz:
+            # Setting the combo emits timezone_changed → panels + re-save (no-op).
+            self._conn_panel.set_selected_tz(saved_tz)
+
+        self._autotrade_panel.load_config(self.settings.get("autotrade") or {})
+        self._ghost_panel.set_opacity_pct(int(self._ghost_opacity * 100))
 
     def _build_menu(self) -> None:
         help_menu = self.menuBar().addMenu("Help")
@@ -475,6 +492,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_autotrade_start(self, config: dict) -> None:
+        self.settings.set("autotrade", config)
         if not self._connected:
             QMessageBox.warning(
                 self, "Not Connected",
@@ -604,6 +622,7 @@ class MainWindow(QMainWindow):
     def _on_timezone_changed(self, tz_name: str) -> None:
         self._orders_panel.set_timezone(tz_name)
         self._history_panel.set_timezone(tz_name)
+        self.settings.set("timezone", tz_name)
 
     # ------------------------------------------------------------------
     # Slot — history filter
@@ -673,10 +692,16 @@ class MainWindow(QMainWindow):
 
     def _on_ghost_opacity(self, opacity: float) -> None:
         self._ghost_opacity = opacity
+        self.settings.set("ghost_opacity_pct", round(opacity * 100))
         if self._mode == "ghost":
             self.setWindowOpacity(opacity)
 
     def _apply_mode(self, mode: str) -> None:
+        # Remember the height the user left the ghost overlay at, so re-entering
+        # ghost mode restores it instead of snapping back to the default.
+        if self._mode == "ghost" and mode != "ghost":
+            self._remember_ghost_height()
+
         self._mode = mode
         compact = mode == "compact"
         ghost = mode == "ghost"
@@ -731,5 +756,22 @@ class MainWindow(QMainWindow):
             self.setFixedWidth(ghost_w)              # lock width; grip resizes height only
             self.setMinimumHeight(150)
             self.setMaximumHeight(16777215)
-            self.resize(ghost_w, 260)
+            self.resize(ghost_w, self._ghost_height)
             self._refresh_orders()   # populate immediately
+
+    def _remember_ghost_height(self) -> None:
+        self._ghost_height = max(150, self.height())
+        self.settings.set("ghost_height", self._ghost_height)
+
+    # ------------------------------------------------------------------
+    # Persist settings on exit
+    # ------------------------------------------------------------------
+
+    def closeEvent(self, event) -> None:
+        if self._mode == "ghost":
+            self._remember_ghost_height()
+        self.settings.update({
+            "autotrade": self._autotrade_panel.config(),
+            "timezone": self._conn_panel.selected_tz(),
+        })
+        super().closeEvent(event)
