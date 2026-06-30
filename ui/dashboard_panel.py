@@ -225,6 +225,7 @@ class DashboardPanel(QWidget):
         self._cards: dict[str, QLabel] = {}
         self._targets: dict[str, QLabel] = {}
         self._period = "1M"
+        self._balance = 0.0
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -400,6 +401,7 @@ class DashboardPanel(QWidget):
     # ------------------------------------------------------------------
 
     def update_account(self, balance: float, equity: float, floating: float, open_count: int) -> None:
+        self._balance = balance
         sign = "+" if floating >= 0 else ""
         self._snapshot.setText(
             f"Balance ${balance:,.2f}    Equity ${equity:,.2f}    "
@@ -407,6 +409,7 @@ class DashboardPanel(QWidget):
         )
 
     def clear(self) -> None:
+        self._balance = 0.0
         self._snapshot.setText("Connect to view performance")
         for key, v in self._cards.items():
             v.setText("—")
@@ -429,6 +432,8 @@ class DashboardPanel(QWidget):
         self._set_money_card("Expectancy", stats.expectancy, suffix=" /trade")
         self._set_card("Trades", f"{stats.total_trades}  ({stats.wins}W/{stats.losses}L)")
         self._set_targets(stats)
+        if self._period == "Today":
+            self._set_daily_growth(stats.net_profit)
         payoff = "∞" if stats.payoff_ratio == float("inf") else f"{stats.payoff_ratio:.2f}"
         self._set_card("Avg Win / Loss", f"${stats.avg_win:,.0f} / ${stats.avg_loss:,.0f}  ({payoff})")
         self._set_money_card("Max Drawdown", -stats.max_drawdown)
@@ -493,6 +498,22 @@ class DashboardPanel(QWidget):
         self._set_target("Largest Loss", "≤ 3× avg loss", ll)
         self._set_target("Max Loss Streak", "≤ 4 ideal", st(lo(stats.max_consec_losses, 4, 6)))
         self._set_target("Avg Hold", "—", "neutral")
+
+    def _set_daily_growth(self, net_profit: float) -> None:
+        """On the Today view, show today's profit as a % of the start-of-day
+        balance (i.e. the previous day's closing balance) on the Net P/L card."""
+        prev_balance = self._balance - net_profit
+        lbl = self._targets["Net P/L"]
+        if prev_balance <= 0:
+            return
+        pct = net_profit / prev_balance * 100.0
+        sign = "+" if pct >= 0 else ""
+        status = "good" if net_profit > 0 else ("bad" if net_profit < 0 else "neutral")
+        lbl.setText(f"{sign}{pct:.2f}% of prev-day balance")
+        lbl.setStyleSheet(
+            f"color: {self._STATUS_COLOR[status]}; font-size: 9px; "
+            f"font-weight: bold; background: transparent;"
+        )
 
     def _set_card(self, key: str, text: str) -> None:
         lbl = self._cards[key]
