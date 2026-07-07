@@ -16,6 +16,11 @@ except Exception as e:
 
 _MT5_PROCESS_NAMES = {"terminal64.exe", "terminal.exe"}
 
+# How long (ms) to wait for the terminal during initialize(). The library
+# default is 60 s, which freezes the GUI thread while the terminal is busy
+# (e.g. mid broker-account switch). A short timeout fails fast instead.
+_INIT_TIMEOUT_MS = 10000
+
 
 class MT5Connector:
     def __init__(self) -> None:
@@ -35,13 +40,23 @@ class MT5Connector:
         if not MT5_AVAILABLE:
             return False, f"MetaTrader5 import failed: {_MT5_IMPORT_ERROR}"
 
-        ok = mt5.initialize()
+        # Drop any stale session first. After switching broker accounts in the
+        # terminal, a previously-initialized handle still points at the old
+        # account and can make initialize() block; shutting down forces a clean
+        # re-attach to whatever account the terminal is now on.
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+
+        ok = mt5.initialize(timeout=_INIT_TIMEOUT_MS)
         if ok:
             self._connected = True
             server_clock.reset()
             server_clock.calibrate()
             return True, ""
 
+        self._connected = False
         code, description = mt5.last_error()
         return False, f"[{code}] {description}"
 
