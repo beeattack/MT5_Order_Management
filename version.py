@@ -4,7 +4,7 @@ Imported by the UI (window title, About dialog) and safe to import from the
 PyInstaller bundle. Bump __version__ here on each release.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 APP_NAME = "MT5 Order Manager"
 AUTHOR = "Pichean"
