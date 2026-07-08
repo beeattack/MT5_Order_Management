@@ -4,7 +4,7 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QLineEdit, QComboBox, QPushButton, QDoubleSpinBox, QSpinBox,
+    QComboBox, QPushButton, QDoubleSpinBox, QSpinBox,
     QTextEdit, QFrame,
 )
 from PySide6.QtCore import Qt, Signal
@@ -125,8 +125,11 @@ class AutoTradePanel(QWidget):
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(6)
 
-        self._symbol = QLineEdit("GOLD#")
+        self._symbol = QComboBox()
+        self._symbol.setEditable(True)   # allow symbols not in Market Watch
+        self._symbol.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self._symbol.setFixedWidth(110)
+        self._symbol.setCurrentText("GOLD#")
 
         self._timeframe = QComboBox()
         self._timeframe.addItems(["M30", "H1", "H4"])
@@ -264,7 +267,7 @@ class AutoTradePanel(QWidget):
         if not cfg:
             return
         if cfg.get("symbol"):
-            self._symbol.setText(str(cfg["symbol"]))
+            self._symbol.setCurrentText(str(cfg["symbol"]))
         if cfg.get("timeframe"):
             self._timeframe.setCurrentText(str(cfg["timeframe"]))
         if cfg.get("mode") in ("PAPER", "LIVE"):
@@ -286,9 +289,19 @@ class AutoTradePanel(QWidget):
                 except (TypeError, ValueError):
                     pass
 
+    def set_symbol_choices(self, symbols: list[str]) -> None:
+        """Populate the symbol combo from the MT5 Market Watch, keeping the
+        current text (which may be a custom symbol not in the list)."""
+        current = self._symbol.currentText()
+        self._symbol.blockSignals(True)
+        self._symbol.clear()
+        self._symbol.addItems(symbols)
+        self._symbol.setCurrentText(current)
+        self._symbol.blockSignals(False)
+
     def config(self) -> dict:
         return {
-            "symbol": self._symbol.text(),
+            "symbol": self._symbol.currentText().strip(),
             "timeframe": self._timeframe.currentText(),
             "mode": self._mode.currentText(),
             "risk_pct": self._risk.value(),

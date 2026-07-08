@@ -5,13 +5,13 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QTextEdit,
+    QAbstractItemView, QTextEdit, QDialog, QTextBrowser,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
 from core import trend_detector as td
-from core.watchlist import TIMEFRAMES, DEFAULT_TIMEFRAME
+from core.watchlist import TIMEFRAMES, TIMEFRAME_LABELS
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -33,14 +33,19 @@ _STATE_COLOR = {
     td.CHOPPY:  COLORS["amber"],
     td.UNKNOWN: COLORS["subtext"],
 }
-_STATE_LABEL = {
-    td.UP:      "▲ UP TREND",
-    td.DOWN:    "▼ DOWN TREND",
-    td.CHOPPY:  "~ choppy",
+# Compact per-timeframe cell labels (columns are narrow)
+_STATE_SHORT = {
+    td.UP:      "▲ UP",
+    td.DOWN:    "▼ DN",
+    td.CHOPPY:  "~",
     td.UNKNOWN: "—",
 }
 
-_COLUMNS = ["Symbol", "Trend", "ADX", "+DI", "−DI", "Updated", ""]
+# One column per timeframe, each showing that symbol's trend on that timeframe.
+_TF_COL_START = 1
+_UPDATED_COL = _TF_COL_START + len(TIMEFRAMES)
+_REMOVE_COL = _UPDATED_COL + 1
+_COLUMNS = ["Symbol", *(TIMEFRAME_LABELS[tf] for tf in TIMEFRAMES), "Updated", ""]
 
 _PANEL_QSS = f"""
 QWidget {{ background-color: {COLORS['bg']}; color: {COLORS['text']}; }}
@@ -73,7 +78,6 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 class WatchlistPanel(QWidget):
     add_requested        = Signal(str)
     remove_requested     = Signal(str)
-    timeframe_changed    = Signal(str)
     watch_toggled        = Signal(bool)
     mute_toggled         = Signal(bool)
     test_sound_requested = Signal()
@@ -93,7 +97,7 @@ class WatchlistPanel(QWidget):
         layout.setContentsMargins(10, 6, 10, 8)
         layout.setSpacing(6)
 
-        title = QLabel("Watchlist — trend alerts (ADX, clear trend vs choppy)")
+        title = QLabel("Watchlist — trend alerts")
         title.setObjectName("panelTitle")
         layout.addWidget(title)
 
@@ -116,15 +120,11 @@ class WatchlistPanel(QWidget):
         add_btn.clicked.connect(self._emit_add)
         ctrl.addWidget(add_btn)
 
-        tf_lbl = QLabel("Timeframe:")
-        tf_lbl.setObjectName("fieldLabel")
-        ctrl.addWidget(tf_lbl)
-        self._tf_combo = QComboBox()
-        self._tf_combo.addItems(TIMEFRAMES)
-        self._tf_combo.setCurrentText(DEFAULT_TIMEFRAME)
-        self._tf_combo.setFixedWidth(80)
-        self._tf_combo.currentTextChanged.connect(self.timeframe_changed)
-        ctrl.addWidget(self._tf_combo)
+        help_btn = QPushButton("ℹ How trend is derived")
+        help_btn.setFixedWidth(170)
+        help_btn.setToolTip("Explain how each timeframe's trend is classified")
+        help_btn.clicked.connect(self._show_trend_help)
+        ctrl.addWidget(help_btn)
 
         ctrl.addStretch()
 
@@ -206,14 +206,59 @@ class WatchlistPanel(QWidget):
         )
         self.watch_toggled.emit(checked)
 
+    def _show_trend_help(self) -> None:
+        """Explain how each timeframe cell's trend is classified. Built from the
+        live trend_detector constants so it stays in sync with the logic."""
+        text = f"""# How the trend is derived
+
+Each timeframe cell classifies the symbol's recent **closed** bars as:
+
+- **▲ UP** — a clear up-trend
+- **▼ DN** — a clear down-trend
+- **~** — choppy / ranging (no clear trend)
+- **—** — not enough data yet
+
+Three checks must **all agree** for a clear ▲ / ▼ trend. If any disagree, the
+cell is **~ choppy**.
+
+### 1. Strength — ADX (period {td.DEFAULT_ADX_PERIOD})
+ADX must be **≥ {td.DEFAULT_ADX_THRESHOLD:.0f}**. Below that the market is treated
+as ranging (**~**), whatever the direction.
+
+### 2. Direction — +DI / −DI and EMA (period {td.DEFAULT_EMA_PERIOD})
+- **▲ UP** needs **+DI &gt; −DI** *and* price **above** the EMA.
+- **▼ DN** needs **−DI &gt; +DI** *and* price **below** the EMA.
+
+### 3. Confirmation — RSI (period {td.DEFAULT_RSI_PERIOD})
+- **▲ UP** needs **RSI &gt; {td.RSI_MIDLINE:.0f}**.
+- **▼ DN** needs **RSI &lt; {td.RSI_MIDLINE:.0f}**.
+
+---
+
+Every timeframe (M1 → Day) is evaluated **independently**, using closed bars
+only — the still-forming bar is ignored. That lets you see whether the trend
+agrees across timeframes.
+
+Alerts (sound + desktop + MT5) fire only when a timeframe **changes** into a
+clear ▲ / ▼ trend, not on every refresh."""
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("How trend is derived")
+        dialog.resize(560, 560)
+        dialog.setStyleSheet(_PANEL_QSS)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        browser = QTextBrowser()
+        browser.setMarkdown(text)
+        layout.addWidget(browser)
+        dialog.exec()
+
     # ------------------------------------------------------------------
     # Public API (driven by MainWindow / monitor callbacks)
     # ------------------------------------------------------------------
 
-    def load_config(self, symbols: list[str], timeframe: str, muted: bool) -> None:
-        self._tf_combo.blockSignals(True)
-        self._tf_combo.setCurrentText(timeframe)
-        self._tf_combo.blockSignals(False)
+    def load_config(self, symbols: list[str], muted: bool) -> None:
         self._mute_btn.setChecked(muted)
         self.set_symbols(symbols)
 
@@ -247,11 +292,10 @@ class WatchlistPanel(QWidget):
         sym_item = QTableWidgetItem(symbol)
         sym_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         self._table.setItem(row, 0, sym_item)
-        for col in range(1, 6):
+        for col in range(1, _REMOVE_COL):
             it = QTableWidgetItem("—")
             it.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            if col >= 2:
-                it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(row, col, it)
 
         remove_btn = QPushButton("✕")
@@ -263,41 +307,41 @@ class WatchlistPanel(QWidget):
             f"QPushButton:hover {{ background-color: #c0392b; }}"
         )
         remove_btn.clicked.connect(lambda _=False, s=symbol: self.remove_requested.emit(s))
-        self._table.setCellWidget(row, 6, remove_btn)
+        self._table.setCellWidget(row, _REMOVE_COL, remove_btn)
 
-    def update_row(self, symbol: str, reading) -> None:
+    def update_row(self, symbol: str, readings: dict) -> None:
+        """readings: {timeframe_name: TrendReading} for this symbol."""
         row = self._row_of.get(symbol)
         if row is None:
             return
-        color = _STATE_COLOR.get(reading.state, COLORS["subtext"])
+        for i, tf_name in enumerate(TIMEFRAMES):
+            self._set_trend_cell(row, _TF_COL_START + i, readings.get(tf_name))
+        self._set_num(row, _UPDATED_COL, datetime.now().strftime("%H:%M:%S"))
 
-        trend_item = QTableWidgetItem(_STATE_LABEL.get(reading.state, "—"))
-        trend_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        trend_item.setForeground(QColor(color))
+    def _set_trend_cell(self, row: int, col: int, reading) -> None:
+        state = reading.state if reading is not None else td.UNKNOWN
+        item = QTableWidgetItem(_STATE_SHORT.get(state, "—"))
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor(_STATE_COLOR.get(state, COLORS["subtext"])))
         f = QFont("Consolas", 11)
-        f.setBold(reading.is_clear)
-        trend_item.setFont(f)
-        self._table.setItem(row, 1, trend_item)
-
-        def num(v):
-            return f"{v:.1f}" if v == v else "—"   # NaN check
-
-        self._set_num(row, 2, num(reading.adx))
-        self._set_num(row, 3, num(reading.plus_di))
-        self._set_num(row, 4, num(reading.minus_di))
-        self._set_num(row, 5, datetime.now().strftime("%H:%M:%S"))
+        f.setBold(state in (td.UP, td.DOWN))
+        item.setFont(f)
+        self._table.setItem(row, col, item)
 
     def _set_num(self, row: int, col: int, text: str) -> None:
         item = QTableWidgetItem(text)
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row, col, item)
 
-    def log_alert(self, symbol: str, reading) -> None:
+    def log_alert(self, symbol: str, timeframe: str, reading) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
         word = "UP trend" if reading.state == td.UP else "DOWN trend"
+        tf_label = TIMEFRAME_LABELS.get(timeframe, timeframe)
         self._log.append(
-            f"[{stamp}] 🔔 {symbol}: clear {word} (ADX {reading.adx:.0f}) — possible entry"
+            f"[{stamp}] 🔔 {symbol} [{tf_label}]: clear {word} "
+            f"(ADX {reading.adx:.0f}) — possible entry"
         )
 
     def log_message(self, text: str) -> None:

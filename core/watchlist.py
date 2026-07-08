@@ -22,8 +22,12 @@ except ImportError:
     mt5 = None  # type: ignore[assignment]
     MT5_AVAILABLE = False
 
-TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4"]
-DEFAULT_TIMEFRAME = "H1"
+# Timeframes shown as columns — each symbol's trend is evaluated on all of them.
+TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
+TIMEFRAME_LABELS = {
+    "M1": "M1", "M5": "M5", "M15": "M15", "M30": "M30",
+    "H1": "H1", "H4": "H4", "D1": "Day",
+}
 
 _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".mt5_order_manager")
 _CONFIG_PATH = os.path.join(_CONFIG_DIR, "watchlist.json")
@@ -49,16 +53,16 @@ def market_watch_symbols() -> list[str]:
 class WatchlistMonitor:
     def __init__(self, connector, update_cb=None, alert_cb=None) -> None:
         self.connector = connector
-        self.update_cb = update_cb or (lambda sym, reading: None)
-        self.alert_cb = alert_cb or (lambda sym, reading: None)
+        self.update_cb = update_cb or (lambda sym, readings: None)
+        self.alert_cb = alert_cb or (lambda sym, tf, reading: None)
 
         self.symbols: list[str] = []
-        self.timeframe_name: str = DEFAULT_TIMEFRAME
         self.muted: bool = False
         self.enabled: bool = False
-        self.lookback: int = 200
+        self.lookback: int = 250   # enough bars for EMA50 on every timeframe
 
-        self._last_state: dict[str, str] = {}
+        # (symbol, timeframe) -> last trend state, to alert only on transitions
+        self._last_state: dict[tuple[str, str], str] = {}
         self.load()
 
     # ------------------------------------------------------------------
@@ -76,13 +80,8 @@ class WatchlistMonitor:
     def remove(self, symbol: str) -> None:
         if symbol in self.symbols:
             self.symbols.remove(symbol)
-            self._last_state.pop(symbol, None)
-            self.save()
-
-    def set_timeframe(self, name: str) -> None:
-        if name != self.timeframe_name:
-            self.timeframe_name = name
-            self._last_state.clear()   # re-evaluate from scratch on the new TF
+            for key in [k for k in self._last_state if k[0] == symbol]:
+                self._last_state.pop(key, None)
             self.save()
 
     def set_muted(self, muted: bool) -> None:
@@ -98,30 +97,43 @@ class WatchlistMonitor:
             return
         if self.connector is None or not self.connector.is_connected():
             return
-        tf = _tf_constant(self.timeframe_name)
-        if tf is None:
-            return
 
         for sym in list(self.symbols):
             try:
                 mt5.symbol_select(sym, True)
-                rates = mt5.copy_rates_from_pos(sym, tf, 0, self.lookback)
             except Exception:
-                rates = None
+                pass
 
-            if rates is None or len(rates) < 2:
-                reading = trend_detector.TrendReading(
-                    trend_detector.UNKNOWN, float("nan"), float("nan"), float("nan")
-                )
-            else:
-                reading = trend_detector.detect(rates[:-1])   # closed bars only
+            readings: dict[str, trend_detector.TrendReading] = {}
+            for tf_name in TIMEFRAMES:
+                reading = self._read(sym, tf_name)
+                readings[tf_name] = reading
 
-            self.update_cb(sym, reading)
+                # Alert only on a genuine transition into a clear trend. The
+                # first evaluation of each (symbol, timeframe) just seeds the
+                # baseline silently, so adding a symbol that's already trending
+                # on several timeframes doesn't fire a burst of alerts at once.
+                key = (sym, tf_name)
+                prev = self._last_state.get(key)
+                if prev is not None and reading.is_clear and reading.state != prev:
+                    self.alert_cb(sym, tf_name, reading)
+                self._last_state[key] = reading.state
 
-            prev = self._last_state.get(sym)
-            if reading.is_clear and reading.state != prev:
-                self.alert_cb(sym, reading)
-            self._last_state[sym] = reading.state
+            self.update_cb(sym, readings)
+
+    def _read(self, sym: str, tf_name: str) -> trend_detector.TrendReading:
+        """Trend reading for one symbol on one timeframe (closed bars only)."""
+        nan = float("nan")
+        tf = _tf_constant(tf_name)
+        if tf is None:
+            return trend_detector.TrendReading(trend_detector.UNKNOWN, nan, nan, nan)
+        try:
+            rates = mt5.copy_rates_from_pos(sym, tf, 0, self.lookback)
+        except Exception:
+            rates = None
+        if rates is None or len(rates) < 2:
+            return trend_detector.TrendReading(trend_detector.UNKNOWN, nan, nan, nan)
+        return trend_detector.detect(rates[:-1])
 
     # ------------------------------------------------------------------
     # Persistence
@@ -132,8 +144,6 @@ class WatchlistMonitor:
             with open(_CONFIG_PATH, encoding="utf-8") as f:
                 data = json.load(f)
             self.symbols = [str(s) for s in data.get("symbols", [])]
-            tf = data.get("timeframe", DEFAULT_TIMEFRAME)
-            self.timeframe_name = tf if tf in TIMEFRAMES else DEFAULT_TIMEFRAME
             self.muted = bool(data.get("muted", False))
         except (OSError, ValueError):
             pass
@@ -144,7 +154,6 @@ class WatchlistMonitor:
             with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump({
                     "symbols": self.symbols,
-                    "timeframe": self.timeframe_name,
                     "muted": self.muted,
                 }, f, indent=2)
         except OSError:

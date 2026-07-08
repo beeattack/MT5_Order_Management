@@ -1,8 +1,10 @@
 """Classify a symbol's recent price action as a clear trend or choppy.
 
 Pure function of closed bars (no MT5, no Qt) so it's testable offline. Uses
-ADX for trend strength and +DI/-DI plus an EMA filter for direction. A trend
-is only "clear" when strength and direction agree; otherwise it's CHOPPY.
+ADX for trend strength and +DI/-DI plus an EMA filter for direction, with RSI
+relative to its 50 midline as a second directional confirmation (RSI > 50 =
+up bias, RSI < 50 = down bias). A trend is only "clear" when strength and both
+direction signals agree; otherwise it's CHOPPY.
 """
 from __future__ import annotations
 
@@ -20,7 +22,9 @@ UNKNOWN = "UNKNOWN"
 
 DEFAULT_ADX_PERIOD = 14
 DEFAULT_EMA_PERIOD = 50
+DEFAULT_RSI_PERIOD = 14
 DEFAULT_ADX_THRESHOLD = 25.0
+RSI_MIDLINE = 50.0
 
 
 @dataclass
@@ -29,6 +33,7 @@ class TrendReading:
     adx: float
     plus_di: float
     minus_di: float
+    rsi: float = float("nan")
 
     @property
     def is_clear(self) -> bool:
@@ -40,30 +45,32 @@ def detect(
     adx_period: int = DEFAULT_ADX_PERIOD,
     ema_period: int = DEFAULT_EMA_PERIOD,
     adx_threshold: float = DEFAULT_ADX_THRESHOLD,
+    rsi_period: int = DEFAULT_RSI_PERIOD,
 ) -> TrendReading:
     nan = float("nan")
-    need = max(2 * adx_period + 1, ema_period + 1)
+    need = max(2 * adx_period + 1, ema_period + 1, rsi_period + 1)
     if bars is None or len(bars) < need:
-        return TrendReading(UNKNOWN, nan, nan, nan)
+        return TrendReading(UNKNOWN, nan, nan, nan, nan)
 
     high, low, close = bars["high"], bars["low"], bars["close"]
     adx_a, pdi_a, mdi_a = indicators.adx(high, low, close, adx_period)
     ema = indicators.ema(close, ema_period)
+    rsi = float(indicators.rsi(close, rsi_period)[-1])
 
     adx = float(adx_a[-1])
     pdi = float(pdi_a[-1])
     mdi = float(mdi_a[-1])
     if not (math.isfinite(adx) and math.isfinite(pdi) and math.isfinite(mdi)):
-        return TrendReading(UNKNOWN, adx, pdi, mdi)
+        return TrendReading(UNKNOWN, adx, pdi, mdi, rsi)
 
     price = float(close[-1])
     ema_now = float(ema[-1])
 
     if adx < adx_threshold:
-        return TrendReading(CHOPPY, adx, pdi, mdi)
-    if pdi > mdi and price > ema_now:
-        return TrendReading(UP, adx, pdi, mdi)
-    if mdi > pdi and price < ema_now:
-        return TrendReading(DOWN, adx, pdi, mdi)
+        return TrendReading(CHOPPY, adx, pdi, mdi, rsi)
+    if pdi > mdi and price > ema_now and rsi > RSI_MIDLINE:
+        return TrendReading(UP, adx, pdi, mdi, rsi)
+    if mdi > pdi and price < ema_now and rsi < RSI_MIDLINE:
+        return TrendReading(DOWN, adx, pdi, mdi, rsi)
     # Strong ADX but direction signals disagree → not a clean entry
-    return TrendReading(CHOPPY, adx, pdi, mdi)
+    return TrendReading(CHOPPY, adx, pdi, mdi, rsi)

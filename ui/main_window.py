@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         )
         # reflect the persisted watchlist in the panel
         self._watchlist_panel.load_config(
-            self.watchlist.symbols, self.watchlist.timeframe_name, self.watchlist.muted
+            self.watchlist.symbols, self.watchlist.muted
         )
 
         # Tray icon for desktop trend-alert notifications
@@ -297,7 +297,6 @@ class MainWindow(QMainWindow):
         self._watchlist_panel = WatchlistPanel()
         self._watchlist_panel.add_requested.connect(self._on_watch_add)
         self._watchlist_panel.remove_requested.connect(self._on_watch_remove)
-        self._watchlist_panel.timeframe_changed.connect(self._on_watch_timeframe)
         self._watchlist_panel.watch_toggled.connect(self._on_watch_toggle)
         self._watchlist_panel.mute_toggled.connect(self._on_watch_mute)
         self._watchlist_panel.test_sound_requested.connect(self._on_watch_test)
@@ -427,6 +426,7 @@ class MainWindow(QMainWindow):
             self._refresh_orders()
             self._on_dashboard_period(*self._dashboard_panel.current_range())
             self._refresh_watch_symbols()
+            self._refresh_autotrade_symbols()
             if self.watchlist.enabled:
                 self._watchlist_timer.start()
                 self.watchlist.on_tick()
@@ -554,11 +554,6 @@ class MainWindow(QMainWindow):
         self.watchlist.remove(symbol)
         self._watchlist_panel.remove_symbol_row(symbol)
 
-    def _on_watch_timeframe(self, name: str) -> None:
-        self.watchlist.set_timeframe(name)
-        if self.watchlist.enabled and self._connected:
-            self.watchlist.on_tick()
-
     def _on_watch_toggle(self, watching: bool) -> None:
         self.watchlist.enabled = watching
         if watching:
@@ -576,11 +571,11 @@ class MainWindow(QMainWindow):
     def _on_watch_mute(self, muted: bool) -> None:
         self.watchlist.set_muted(muted)
 
-    def _on_watch_alert(self, symbol: str, reading) -> None:
-        self._watchlist_panel.log_alert(symbol, reading)
-        msg = f"Clear {reading.state} trend (ADX {reading.adx:.0f}) - possible entry"
-        self._notify(f"Trend Alert — {symbol}", msg)
-        mt5_alert_bridge.write_alert(f"{symbol}: {msg}")
+    def _on_watch_alert(self, symbol: str, timeframe: str, reading) -> None:
+        self._watchlist_panel.log_alert(symbol, timeframe, reading)
+        msg = f"{timeframe} clear {reading.state} trend (ADX {reading.adx:.0f}) - possible entry"
+        self._notify(f"Trend Alert — {symbol} [{timeframe}]", msg)
+        mt5_alert_bridge.write_alert(f"{symbol} {timeframe}: {msg}")
         if not self.watchlist.muted:
             play_alert()
 
@@ -611,9 +606,16 @@ class MainWindow(QMainWindow):
         if self._connected and self.connector.is_connected():
             self._watchlist_panel.set_symbol_choices(market_watch_symbols())
 
+    def _refresh_autotrade_symbols(self) -> None:
+        if self._connected and self.connector.is_connected():
+            self._autotrade_panel.set_symbol_choices(market_watch_symbols())
+
     def _on_tab_changed(self, index: int) -> None:
-        if self._tabs.widget(index) is self._watchlist_panel:
+        widget = self._tabs.widget(index)
+        if widget is self._watchlist_panel:
             self._refresh_watch_symbols()
+        elif widget is self._autotrade_panel:
+            self._refresh_autotrade_symbols()
 
     # ------------------------------------------------------------------
     # Slot — timezone change
