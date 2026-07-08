@@ -11,7 +11,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
 from core import trend_detector as td
-from core.watchlist import TIMEFRAMES, TIMEFRAME_LABELS
+from core.watchlist import (
+    TIMEFRAMES, TIMEFRAME_LABELS, ALERT_TIMEFRAMES, CONFLUENCE_LABEL,
+)
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -41,11 +43,16 @@ _STATE_SHORT = {
     td.UNKNOWN: "—",
 }
 
-# One column per timeframe, each showing that symbol's trend on that timeframe.
+# One column per timeframe, each showing that symbol's trend on that timeframe,
+# plus an Align column summarising how many timeframes agree.
 _TF_COL_START = 1
-_UPDATED_COL = _TF_COL_START + len(TIMEFRAMES)
+_ALIGN_COL = _TF_COL_START + len(TIMEFRAMES)
+_UPDATED_COL = _ALIGN_COL + 1
 _REMOVE_COL = _UPDATED_COL + 1
-_COLUMNS = ["Symbol", *(TIMEFRAME_LABELS[tf] for tf in TIMEFRAMES), "Updated", ""]
+_COLUMNS = ["Symbol", *(TIMEFRAME_LABELS[tf] for tf in TIMEFRAMES), "Align", "Updated", ""]
+
+# Bold the Align summary when at least this many timeframes agree
+_ALIGN_STRONG = 5
 
 _PANEL_QSS = f"""
 QWidget {{ background-color: {COLORS['bg']}; color: {COLORS['text']}; }}
@@ -222,25 +229,38 @@ Three checks must **all agree** for a clear ▲ / ▼ trend. If any disagree, th
 cell is **~ choppy**.
 
 ### 1. Strength — ADX (period {td.DEFAULT_ADX_PERIOD})
-ADX must be **≥ {td.DEFAULT_ADX_THRESHOLD:.0f}**. Below that the market is treated
-as ranging (**~**), whatever the direction.
+ADX must be **≥ {td.DEFAULT_ADX_THRESHOLD:.0f}** to *enter* a trend. Below that
+the market is treated as ranging (**~**), whatever the direction.
 
 ### 2. Direction — +DI / −DI and EMA (period {td.DEFAULT_EMA_PERIOD})
 - **▲ UP** needs **+DI &gt; −DI** *and* price **above** the EMA.
 - **▼ DN** needs **−DI &gt; +DI** *and* price **below** the EMA.
 
 ### 3. Confirmation — RSI (period {td.DEFAULT_RSI_PERIOD})
-- **▲ UP** needs **RSI &gt; {td.RSI_MIDLINE:.0f}**.
-- **▼ DN** needs **RSI &lt; {td.RSI_MIDLINE:.0f}**.
+- **▲ UP** needs **RSI &gt; {td.RSI_MIDLINE + td.RSI_BAND:.0f}**.
+- **▼ DN** needs **RSI &lt; {td.RSI_MIDLINE - td.RSI_BAND:.0f}**.
+
+### Stickiness (hysteresis)
+Once a trend is established it doesn't flip off at the first wobble: it
+**holds** until ADX falls below **{td.ADX_EXIT_THRESHOLD:.0f}**, RSI crosses to
+the other side of **{td.RSI_MIDLINE:.0f}±{td.RSI_BAND:.0f}**, or a direction
+check fails. This stops the cells — and alerts — from flickering when a value
+hovers right at a threshold.
+
+### Align column
+Counts the timeframes agreeing on each direction (e.g. **5▲ 1▼**), colored by
+the dominant side and bold when {_ALIGN_STRONG}+ agree. Hover it for the
+per-timeframe breakdown.
 
 ---
 
 Every timeframe (M1 → Day) is evaluated **independently**, using closed bars
-only — the still-forming bar is ignored. That lets you see whether the trend
-agrees across timeframes.
+only — the still-forming bar is ignored.
 
 Alerts (sound + desktop + MT5) fire only when a timeframe **changes** into a
-clear ▲ / ▼ trend, not on every refresh."""
+clear ▲ / ▼ trend — and only for **{", ".join(ALERT_TIMEFRAMES)}** (M1/M5
+flip too often). A **confluence alert** fires when **{CONFLUENCE_LABEL}**
+all align in the same clear direction."""
 
         dialog = QDialog(self)
         dialog.setWindowTitle("How trend is derived")
@@ -316,6 +336,7 @@ clear ▲ / ▼ trend, not on every refresh."""
             return
         for i, tf_name in enumerate(TIMEFRAMES):
             self._set_trend_cell(row, _TF_COL_START + i, readings.get(tf_name))
+        self._set_align_cell(row, readings)
         self._set_num(row, _UPDATED_COL, datetime.now().strftime("%H:%M:%S"))
 
     def _set_trend_cell(self, row: int, col: int, reading) -> None:
@@ -328,6 +349,35 @@ clear ▲ / ▼ trend, not on every refresh."""
         f.setBold(state in (td.UP, td.DOWN))
         item.setFont(f)
         self._table.setItem(row, col, item)
+
+    def _set_align_cell(self, row: int, readings: dict) -> None:
+        """Cross-timeframe summary: how many TFs agree on each direction."""
+        ups = sum(1 for r in readings.values() if r is not None and r.state == td.UP)
+        downs = sum(1 for r in readings.values() if r is not None and r.state == td.DOWN)
+        if ups == 0 and downs == 0:
+            text, color, bold = "—", COLORS["subtext"], False
+        else:
+            text = f"{ups}▲ {downs}▼"
+            if ups > downs:
+                color = COLORS["green"]
+            elif downs > ups:
+                color = COLORS["red"]
+            else:
+                color = COLORS["amber"]
+            bold = max(ups, downs) >= _ALIGN_STRONG
+
+        item = QTableWidgetItem(text)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor(color))
+        f = QFont("Consolas", 11)
+        f.setBold(bold)
+        item.setFont(f)
+        item.setToolTip("\n".join(
+            f"{TIMEFRAME_LABELS[tf]}: {readings[tf].state if readings.get(tf) else '—'}"
+            for tf in TIMEFRAMES
+        ))
+        self._table.setItem(row, _ALIGN_COL, item)
 
     def _set_num(self, row: int, col: int, text: str) -> None:
         item = QTableWidgetItem(text)

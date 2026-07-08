@@ -5,6 +5,12 @@ ADX for trend strength and +DI/-DI plus an EMA filter for direction, with RSI
 relative to its 50 midline as a second directional confirmation (RSI > 50 =
 up bias, RSI < 50 = down bias). A trend is only "clear" when strength and both
 direction signals agree; otherwise it's CHOPPY.
+
+Hysteresis: entering a trend requires the strict thresholds (ADX >= entry,
+RSI beyond 50±band), but an *established* trend (passed via `prev_state`)
+holds on relaxed ones (ADX >= exit, RSI not across the opposite band edge).
+This stops the state — and transition alerts — from flip-flapping when a
+value hovers at a threshold.
 """
 from __future__ import annotations
 
@@ -23,8 +29,10 @@ UNKNOWN = "UNKNOWN"
 DEFAULT_ADX_PERIOD = 14
 DEFAULT_EMA_PERIOD = 50
 DEFAULT_RSI_PERIOD = 14
-DEFAULT_ADX_THRESHOLD = 25.0
+DEFAULT_ADX_THRESHOLD = 25.0   # ADX required to ENTER a clear trend
+ADX_EXIT_THRESHOLD = 20.0      # an established trend holds until ADX drops below this
 RSI_MIDLINE = 50.0
+RSI_BAND = 2.0                 # enter needs RSI beyond 50±band; hold ends past the opposite edge
 
 
 @dataclass
@@ -46,6 +54,7 @@ def detect(
     ema_period: int = DEFAULT_EMA_PERIOD,
     adx_threshold: float = DEFAULT_ADX_THRESHOLD,
     rsi_period: int = DEFAULT_RSI_PERIOD,
+    prev_state: str | None = None,
 ) -> TrendReading:
     nan = float("nan")
     need = max(2 * adx_period + 1, ema_period + 1, rsi_period + 1)
@@ -66,11 +75,23 @@ def detect(
     price = float(close[-1])
     ema_now = float(ema[-1])
 
-    if adx < adx_threshold:
-        return TrendReading(CHOPPY, adx, pdi, mdi, rsi)
-    if pdi > mdi and price > ema_now and rsi > RSI_MIDLINE:
+    up_dir = pdi > mdi and price > ema_now
+    down_dir = mdi > pdi and price < ema_now
+
+    # Entry — strict thresholds must all agree
+    if adx >= adx_threshold:
+        if up_dir and rsi > RSI_MIDLINE + RSI_BAND:
+            return TrendReading(UP, adx, pdi, mdi, rsi)
+        if down_dir and rsi < RSI_MIDLINE - RSI_BAND:
+            return TrendReading(DOWN, adx, pdi, mdi, rsi)
+
+    # Hold (hysteresis) — an established trend persists on relaxed thresholds,
+    # so hovering at ADX≈entry or RSI≈50 doesn't flip the state every bar
+    if (prev_state == UP and adx >= ADX_EXIT_THRESHOLD
+            and up_dir and rsi > RSI_MIDLINE - RSI_BAND):
         return TrendReading(UP, adx, pdi, mdi, rsi)
-    if mdi > pdi and price < ema_now and rsi < RSI_MIDLINE:
+    if (prev_state == DOWN and adx >= ADX_EXIT_THRESHOLD
+            and down_dir and rsi < RSI_MIDLINE + RSI_BAND):
         return TrendReading(DOWN, adx, pdi, mdi, rsi)
-    # Strong ADX but direction signals disagree → not a clean entry
+
     return TrendReading(CHOPPY, adx, pdi, mdi, rsi)

@@ -29,6 +29,14 @@ TIMEFRAME_LABELS = {
     "H1": "H1", "H4": "H4", "D1": "Day",
 }
 
+# Alerts fire only for these timeframes — M1/M5 transition too often and would
+# drown the log and the sound. Every timeframe still *displays* its trend.
+ALERT_TIMEFRAMES = ("M15", "M30", "H1", "H4", "D1")
+
+# Confluence alert: fires when all of these agree on one clear direction.
+CONFLUENCE_TFS = ("M15", "M30", "H1")
+CONFLUENCE_LABEL = "M15+M30+H1"
+
 _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".mt5_order_manager")
 _CONFIG_PATH = os.path.join(_CONFIG_DIR, "watchlist.json")
 
@@ -63,6 +71,8 @@ class WatchlistMonitor:
 
         # (symbol, timeframe) -> last trend state, to alert only on transitions
         self._last_state: dict[tuple[str, str], str] = {}
+        # symbol -> last confluence direction ("UP"/"DOWN"/"NONE"), same pattern
+        self._last_confluence: dict[str, str] = {}
         self.load()
 
     # ------------------------------------------------------------------
@@ -82,6 +92,7 @@ class WatchlistMonitor:
             self.symbols.remove(symbol)
             for key in [k for k in self._last_state if k[0] == symbol]:
                 self._last_state.pop(key, None)
+            self._last_confluence.pop(symbol, None)
             self.save()
 
     def set_muted(self, muted: bool) -> None:
@@ -115,11 +126,26 @@ class WatchlistMonitor:
                 # on several timeframes doesn't fire a burst of alerts at once.
                 key = (sym, tf_name)
                 prev = self._last_state.get(key)
-                if prev is not None and reading.is_clear and reading.state != prev:
+                if (prev is not None and reading.is_clear and reading.state != prev
+                        and tf_name in ALERT_TIMEFRAMES):
                     self.alert_cb(sym, tf_name, reading)
                 self._last_state[key] = reading.state
 
+            self._check_confluence(sym, readings)
             self.update_cb(sym, readings)
+
+    def _check_confluence(self, sym: str, readings: dict) -> None:
+        """Fire one alert when CONFLUENCE_TFS first all align in a clear
+        direction (transition-based, seeded silently like per-TF alerts)."""
+        states = {readings[tf].state for tf in CONFLUENCE_TFS}
+        if len(states) == 1 and (s := states.pop()) in (trend_detector.UP, trend_detector.DOWN):
+            conf = s
+        else:
+            conf = "NONE"
+        prev = self._last_confluence.get(sym)
+        if prev is not None and conf != "NONE" and conf != prev:
+            self.alert_cb(sym, CONFLUENCE_LABEL, readings[CONFLUENCE_TFS[-1]])
+        self._last_confluence[sym] = conf
 
     def _read(self, sym: str, tf_name: str) -> trend_detector.TrendReading:
         """Trend reading for one symbol on one timeframe (closed bars only)."""
@@ -133,7 +159,10 @@ class WatchlistMonitor:
             rates = None
         if rates is None or len(rates) < 2:
             return trend_detector.TrendReading(trend_detector.UNKNOWN, nan, nan, nan)
-        return trend_detector.detect(rates[:-1])
+        # prev_state enables the detector's hysteresis (hold thresholds)
+        return trend_detector.detect(
+            rates[:-1], prev_state=self._last_state.get((sym, tf_name))
+        )
 
     # ------------------------------------------------------------------
     # Persistence
