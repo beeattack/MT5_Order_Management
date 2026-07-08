@@ -118,7 +118,9 @@ QPushButton:hover {{
 
 
 class OrdersPanel(QWidget):
-    close_order_requested  = Signal(int, float)
+    # ticket is passed as object (Python int) — MT5 tickets can exceed the
+    # 32-bit range of Qt's int and would otherwise fail to marshal
+    close_order_requested  = Signal(object, float)
     close_all_requested    = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -381,15 +383,15 @@ class OrdersPanel(QWidget):
         layout.addStretch()
 
         btn_specs = [
-            ("✕", COLORS["red"],   100.0),   # ✕ — close (100%)
-            ("50%",    COLORS["amber"],  50.0),
-            ("80%",    COLORS["amber"],  80.0),
-            ("90%",    COLORS["amber"],  90.0),
+            ("✕", COLORS["red"],   100.0, 32),   # ✕ — close (100%)
+            ("50%",    COLORS["amber"],  50.0, 44),
+            ("80%",    COLORS["amber"],  80.0, 44),
+            ("90%",    COLORS["amber"],  90.0, 44),
         ]
 
-        for label, color, pct in btn_specs:
+        for label, color, pct, width in btn_specs:
             btn = QPushButton(label)
-            btn.setFixedHeight(22)
+            btn.setFixedSize(width, 22)   # fixed size so buttons can't collapse to a sliver
             btn.setToolTip("Close position (100%)" if pct >= 100 else f"Close {pct:.0f}%")
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: {color}; color: #1a1a2e; "

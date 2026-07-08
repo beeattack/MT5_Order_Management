@@ -98,7 +98,8 @@ class GhostPanel(QWidget):
 
     switch_normal        = Signal()
     switch_compact       = Signal()
-    close_order_requested = Signal(int)   # ticket (closes 100%)
+    close_order_requested = Signal(object)   # ticket (closes 100%); object avoids
+    #                                          Qt's 32-bit int limit for large MT5 tickets
     opacity_changed      = Signal(float)  # window opacity 0.30–1.00
 
     CONTENT_WIDTH = 300
