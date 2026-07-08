@@ -335,11 +335,18 @@ all align in the same clear direction."""
         if row is None:
             return
         for i, tf_name in enumerate(TIMEFRAMES):
-            self._set_trend_cell(row, _TF_COL_START + i, readings.get(tf_name))
+            self._set_trend_cell(row, _TF_COL_START + i, tf_name, readings.get(tf_name))
         self._set_align_cell(row, readings)
         self._set_num(row, _UPDATED_COL, datetime.now().strftime("%H:%M:%S"))
 
-    def _set_trend_cell(self, row: int, col: int, reading) -> None:
+    _STATE_TIP_TITLE = {
+        td.UP:      "▲ UP TREND",
+        td.DOWN:    "▼ DOWN TREND",
+        td.CHOPPY:  "~ Choppy / ranging",
+        td.UNKNOWN: "No data yet",
+    }
+
+    def _set_trend_cell(self, row: int, col: int, tf_name: str, reading) -> None:
         state = reading.state if reading is not None else td.UNKNOWN
         item = QTableWidgetItem(_STATE_SHORT.get(state, "—"))
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -348,7 +355,31 @@ all align in the same clear direction."""
         f = QFont("Consolas", 11)
         f.setBold(state in (td.UP, td.DOWN))
         item.setFont(f)
+        item.setToolTip(self._trend_tooltip(tf_name, reading))
         self._table.setItem(row, col, item)
+
+    def _trend_tooltip(self, tf_name: str, reading) -> str:
+        """Hover detail: every technical value the trend is derived from."""
+        label = TIMEFRAME_LABELS.get(tf_name, tf_name)
+        if reading is None:
+            return f"{label}: no data yet"
+
+        def num(v):   # indicator values, NaN-safe
+            return f"{v:.1f}" if v == v else "—"
+
+        def px(v):    # prices — enough decimals for FX, trimmed for metals
+            return f"{v:,.5f}".rstrip("0").rstrip(".") if v == v else "—"
+
+        title = self._STATE_TIP_TITLE.get(reading.state, "—")
+        return (
+            f"{title} — {label}\n"
+            f"ADX   {num(reading.adx)}   (enter ≥ {td.DEFAULT_ADX_THRESHOLD:.0f},"
+            f" hold ≥ {td.ADX_EXIT_THRESHOLD:.0f})\n"
+            f"+DI   {num(reading.plus_di)}    −DI  {num(reading.minus_di)}\n"
+            f"Close {px(reading.price)}   EMA{td.DEFAULT_EMA_PERIOD} {px(reading.ema)}\n"
+            f"RSI   {num(reading.rsi)}   (▲ > {td.RSI_MIDLINE + td.RSI_BAND:.0f},"
+            f" ▼ < {td.RSI_MIDLINE - td.RSI_BAND:.0f})"
+        )
 
     def _set_align_cell(self, row: int, readings: dict) -> None:
         """Cross-timeframe summary: how many TFs agree on each direction."""

@@ -42,6 +42,8 @@ class TrendReading:
     plus_di: float
     minus_di: float
     rsi: float = float("nan")
+    price: float = float("nan")   # last closed-bar close
+    ema: float = float("nan")     # EMA(DEFAULT_EMA_PERIOD) at that bar
 
     @property
     def is_clear(self) -> bool:
@@ -75,23 +77,26 @@ def detect(
     price = float(close[-1])
     ema_now = float(ema[-1])
 
+    def _reading(state: str) -> TrendReading:
+        return TrendReading(state, adx, pdi, mdi, rsi, price, ema_now)
+
     up_dir = pdi > mdi and price > ema_now
     down_dir = mdi > pdi and price < ema_now
 
     # Entry — strict thresholds must all agree
     if adx >= adx_threshold:
         if up_dir and rsi > RSI_MIDLINE + RSI_BAND:
-            return TrendReading(UP, adx, pdi, mdi, rsi)
+            return _reading(UP)
         if down_dir and rsi < RSI_MIDLINE - RSI_BAND:
-            return TrendReading(DOWN, adx, pdi, mdi, rsi)
+            return _reading(DOWN)
 
     # Hold (hysteresis) — an established trend persists on relaxed thresholds,
     # so hovering at ADX≈entry or RSI≈50 doesn't flip the state every bar
     if (prev_state == UP and adx >= ADX_EXIT_THRESHOLD
             and up_dir and rsi > RSI_MIDLINE - RSI_BAND):
-        return TrendReading(UP, adx, pdi, mdi, rsi)
+        return _reading(UP)
     if (prev_state == DOWN and adx >= ADX_EXIT_THRESHOLD
             and down_dir and rsi < RSI_MIDLINE + RSI_BAND):
-        return TrendReading(DOWN, adx, pdi, mdi, rsi)
+        return _reading(DOWN)
 
-    return TrendReading(CHOPPY, adx, pdi, mdi, rsi)
+    return _reading(CHOPPY)
