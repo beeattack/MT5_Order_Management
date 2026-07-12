@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
@@ -18,11 +18,13 @@ from ui.history_panel    import HistoryPanel
 from ui.autotrade_panel  import AutoTradePanel
 from ui.dashboard_panel  import DashboardPanel
 from ui.watchlist_panel  import WatchlistPanel
+from ui.tradeplan_panel  import TradePlanPanel
 from ui.ghost_panel      import GhostPanel
 
 from core.auto_trader import AutoTrader
 from core.watchlist import WatchlistMonitor, market_watch_symbols
 from core.settings_store import SettingsStore
+from core import trade_plan
 from core import analytics
 from core import mt5_alert_bridge
 from utils.sound import play_alert
@@ -301,8 +303,14 @@ class MainWindow(QMainWindow):
         self._watchlist_panel.mute_toggled.connect(self._on_watch_mute)
         self._watchlist_panel.test_sound_requested.connect(self._on_watch_test)
 
+        self._tradeplan_panel = TradePlanPanel()
+        self._tradeplan_panel.dd_pct_changed.connect(self._on_plan_pct_changed)
+        self._tradeplan_panel.target_changed.connect(self._on_plan_target_changed)
+        self._tradeplan_panel.refresh_requested.connect(self._refresh_trade_plan)
+
         # Dashboard is the leftmost tab and the default landing view
         self._tabs.addTab(self._dashboard_panel, "Dashboard")
+        self._tabs.addTab(self._tradeplan_panel, "Trade Plan")
         self._tabs.addTab(self._orders_panel, "Active Orders")
         self._tabs.addTab(self._history_panel, "History")
         self._tabs.addTab(self._watchlist_panel, "Watchlist")
@@ -330,6 +338,11 @@ class MainWindow(QMainWindow):
 
         self._autotrade_panel.load_config(self.settings.get("autotrade") or {})
         self._ghost_panel.set_opacity_pct(int(self._ghost_opacity * 100))
+        self._tradeplan_panel.set_dd_pct(int(self.settings.get("tradeplan_dd_pct", 100)))
+        self._tradeplan_panel.set_target_config(
+            bool(self.settings.get("tradeplan_target_manual", False)),
+            float(self.settings.get("tradeplan_target_amount", 0.0)),
+        )
 
     def _build_menu(self) -> None:
         help_menu = self.menuBar().addMenu("Help")
@@ -409,6 +422,11 @@ class MainWindow(QMainWindow):
         self._watchlist_timer.setInterval(10000)
         self._watchlist_timer.timeout.connect(self.watchlist.on_tick)
 
+        # Trade-plan "today so far" refresh (runs while connected)
+        self._plan_timer = QTimer(self)
+        self._plan_timer.setInterval(5000)
+        self._plan_timer.timeout.connect(self._update_plan_today)
+
     # ------------------------------------------------------------------
     # Slots — connection
     # ------------------------------------------------------------------
@@ -427,6 +445,8 @@ class MainWindow(QMainWindow):
             self._on_dashboard_period(*self._dashboard_panel.current_range())
             self._refresh_watch_symbols()
             self._refresh_autotrade_symbols()
+            self._refresh_trade_plan()
+            self._plan_timer.start()
             if self.watchlist.enabled:
                 self._watchlist_timer.start()
                 self.watchlist.on_tick()
@@ -441,6 +461,8 @@ class MainWindow(QMainWindow):
         self._orders_timer.stop()
         self._autotrade_timer.stop()
         self._watchlist_timer.stop()
+        self._plan_timer.stop()
+        self._tradeplan_panel.clear()
         self.auto_trader.stop()
         self._autotrade_panel.set_running(False)
         self.connector.disconnect()
@@ -616,6 +638,42 @@ class MainWindow(QMainWindow):
             self._refresh_watch_symbols()
         elif widget is self._autotrade_panel:
             self._refresh_autotrade_symbols()
+        elif widget is self._tradeplan_panel:
+            self._refresh_trade_plan()
+
+    # ------------------------------------------------------------------
+    # Slots — trade plan
+    # ------------------------------------------------------------------
+
+    def _on_plan_pct_changed(self, pct: int) -> None:
+        self.settings.set("tradeplan_dd_pct", pct)
+
+    def _on_plan_target_changed(self, manual: bool, amount: float) -> None:
+        self.settings.update({
+            "tradeplan_target_manual": manual,
+            "tradeplan_target_amount": amount,
+        })
+
+    def _refresh_trade_plan(self) -> None:
+        """Rebuild the plan base from history (last profitable day)."""
+        if not self._connected:
+            return
+        now = datetime.now(timezone.utc)
+        frm, to = trade_plan.lookback_range_utc(now)
+        entries = self.history_mgr.get_history(frm, to)
+        self._tradeplan_panel.set_plan(trade_plan.find_base_day(entries, now))
+        self._update_plan_today()
+
+    def _update_plan_today(self) -> None:
+        """Refresh today's realized + floating P/L shown on the plan tab."""
+        if not self._connected:
+            return
+        now = datetime.now(timezone.utc)
+        frm, to = trade_plan.today_range_utc(now)
+        realized = sum(e.profit for e in self.history_mgr.get_history(frm, to))
+        info = self.connector.get_account_info()
+        floating = info.get("profit", 0.0) if info else 0.0
+        self._tradeplan_panel.update_today(realized, floating)
 
     # ------------------------------------------------------------------
     # Slot — timezone change
