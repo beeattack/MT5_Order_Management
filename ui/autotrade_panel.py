@@ -164,7 +164,7 @@ class AutoTradePanel(QWidget):
             ("Session end (UTC)", self._session_end),
         ]
         for i, (label, widget) in enumerate(fields):
-            row, col = divmod(i, 3)
+            row, col = divmod(i, 4)
             cell = QVBoxLayout()
             cell.setSpacing(2)
             lbl = QLabel(label)

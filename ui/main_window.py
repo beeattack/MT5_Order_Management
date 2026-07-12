@@ -222,8 +222,8 @@ class MainWindow(QMainWindow):
         self._ghost_height = max(150, int(self.settings.get("ghost_height", 260)))
 
         self.setWindowTitle(f"{APP_NAME}  v{__version__}")
-        self.resize(1200, 700)
-        self.setMinimumSize(900, 500)
+        self.resize(840, 700)          # 30% narrower default than the old 1200
+        self.setMinimumSize(820, 500)
         self.setStyleSheet(_GLOBAL_QSS)
 
         self._build_ui()
@@ -791,9 +791,9 @@ class MainWindow(QMainWindow):
             self.setWindowOpacity(1.0)
             self.setWindowFlags(base | Qt.WindowType.WindowMinMaxButtonsHint)
             self.show()
-            self.setMinimumSize(900, 500)
+            self.setMinimumSize(820, 500)
             self.setMaximumSize(16777215, 16777215)
-            self.resize(1200, 700)
+            self.resize(840, 700)
         elif compact:
             self.setWindowOpacity(1.0)
             self.setWindowFlags(base | Qt.WindowType.WindowMinimizeButtonHint |

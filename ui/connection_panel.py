@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QPushButton, QFrame, QComboBox
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QFrame, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -97,10 +97,13 @@ class ConnectionPanel(QWidget):
     ghost_requested      = Signal()
     timezone_changed     = Signal(str)   # emits IANA timezone name
 
+    NORMAL_HEIGHT = 76    # two rows: status/controls + account stats
+    COMPACT_HEIGHT = 38   # single row (stats shown in the orders panel instead)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("ConnectionPanel")
-        self.setFixedHeight(55)
+        self.setFixedHeight(self.NORMAL_HEIGHT)
         self.setStyleSheet(_PANEL_QSS)
         self._is_connected   = False
         self._account_name   = ""
@@ -109,45 +112,22 @@ class ConnectionPanel(QWidget):
         self.set_state_not_found()
 
     # ------------------------------------------------------------------
-    # UI construction
+    # UI construction — two rows so stats never collide with the controls
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(10)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 5, 12, 6)
+        outer.setSpacing(3)
 
-        # Status indicator
+        # ---- Row 1: status + timezone + control buttons ----
+        top = QHBoxLayout()
+        top.setSpacing(10)
+
         self._status_label = QLabel("● MT5 Not Found")
         self._status_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self._status_label.setMinimumWidth(160)
-        layout.addWidget(self._status_label)
-
-        # Divider — always visible (separates status from stats)
-        layout.addWidget(_make_divider())
-
-        # Balance block — hidden in compact mode (includes its trailing divider)
-        self._balance_widget = QWidget()
-        self._balance_widget.setStyleSheet("background: transparent;")
-        bal_layout = QHBoxLayout(self._balance_widget)
-        bal_layout.setContentsMargins(0, 0, 0, 0)
-        bal_layout.setSpacing(10)
-        bal_layout.addLayout(self._make_stat_block("BALANCE", "_balance_val"))
-        bal_layout.addWidget(_make_divider())
-        layout.addWidget(self._balance_widget)
-
-        # Equity + P/L block — hidden in compact mode (shown in orders panel header instead)
-        self._equity_pl_widget = QWidget()
-        self._equity_pl_widget.setStyleSheet("background: transparent;")
-        ep_layout = QHBoxLayout(self._equity_pl_widget)
-        ep_layout.setContentsMargins(0, 0, 0, 0)
-        ep_layout.setSpacing(10)
-        ep_layout.addLayout(self._make_stat_block("EQUITY", "_equity_val"))
-        ep_layout.addWidget(_make_divider())
-        ep_layout.addLayout(self._make_stat_block("P / L", "_pl_val"))
-        layout.addWidget(self._equity_pl_widget)
-
-        layout.addStretch()
+        top.addWidget(self._status_label)
+        top.addStretch()
 
         # Timezone selector — hidden in compact mode
         self._tz_widget = QWidget()
@@ -167,25 +147,43 @@ class ConnectionPanel(QWidget):
         self._tz_combo.currentIndexChanged.connect(self._on_tz_changed)
         tz_layout.addWidget(self._tz_combo)
 
-        layout.addWidget(self._tz_widget)
+        top.addWidget(self._tz_widget)
 
         # Single connect/disconnect toggle button
         self._toggle_btn = QPushButton("Connect")
         self._toggle_btn.setFixedWidth(105)
         self._toggle_btn.clicked.connect(self._on_toggle_connection)
-        layout.addWidget(self._toggle_btn)
+        top.addWidget(self._toggle_btn)
 
         # Display mode toggle button
         self._mode_btn = QPushButton("Compact")
         self._mode_btn.setFixedWidth(82)
         self._mode_btn.clicked.connect(self.display_mode_toggled)
-        layout.addWidget(self._mode_btn)
+        top.addWidget(self._mode_btn)
 
         # Ghost (floating minimal overlay) button
         self._ghost_btn = QPushButton("Ghost")
         self._ghost_btn.setFixedWidth(70)
         self._ghost_btn.clicked.connect(self.ghost_requested)
-        layout.addWidget(self._ghost_btn)
+        top.addWidget(self._ghost_btn)
+
+        outer.addLayout(top)
+
+        # ---- Row 2: account stats — hidden in compact mode ----
+        self._stats_widget = QWidget()
+        self._stats_widget.setStyleSheet("background: transparent;")
+        stats = QHBoxLayout(self._stats_widget)
+        stats.setContentsMargins(0, 0, 0, 0)
+        stats.setSpacing(10)
+        stats.addLayout(self._make_stat_block("BALANCE", "_balance_val"))
+        stats.addWidget(_make_divider())
+        stats.addLayout(self._make_stat_block("EQUITY", "_equity_val"))
+        stats.addWidget(_make_divider())
+        stats.addLayout(self._make_stat_block("P / L", "_pl_val"))
+        stats.addWidget(_make_divider())
+        stats.addLayout(self._make_stat_block("BROKER", "_broker_val"))
+        stats.addStretch()
+        outer.addWidget(self._stats_widget)
 
     def _make_stat_block(self, key: str, attr: str) -> QHBoxLayout:
         block = QHBoxLayout()
@@ -277,6 +275,8 @@ class ConnectionPanel(QWidget):
             f"QPushButton:hover {{ background-color: #c0392b; }}"
         )
         if account_info:
+            broker = (account_info.get("company") or account_info.get("server") or "").strip()
+            self._broker_val.setText(broker or "—")
             self.update_account_stats(
                 account_info.get("balance", 0.0),
                 account_info.get("equity", 0.0),
@@ -295,7 +295,7 @@ class ConnectionPanel(QWidget):
         )
 
     def _clear_stats(self) -> None:
-        for attr in ("_balance_val", "_equity_val", "_pl_val"):
+        for attr in ("_balance_val", "_equity_val", "_pl_val", "_broker_val"):
             lbl: QLabel = getattr(self, attr)
             lbl.setText("—")
             lbl.setStyleSheet("")
@@ -306,9 +306,8 @@ class ConnectionPanel(QWidget):
 
     def set_compact_layout(self, compact: bool) -> None:
         self._compact_layout = compact
-        self._balance_widget.setVisible(not compact)
-        self._equity_pl_widget.setVisible(not compact)
+        self._stats_widget.setVisible(not compact)
         self._tz_widget.setVisible(not compact)
-        self.setFixedHeight(38 if compact else 55)
+        self.setFixedHeight(self.COMPACT_HEIGHT if compact else self.NORMAL_HEIGHT)
         self._mode_btn.setText("Normal" if compact else "Compact")
         self._refresh_status_label()
