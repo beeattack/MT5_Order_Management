@@ -41,6 +41,26 @@ _COMPACT_HIDDEN_COLS = frozenset(
     _COL[n] for n in ("Ticket", "Open Price", "Current", "SL", "TP", "Open Time")
 )
 
+# Columns hidden by default in normal mode so Profit and Actions always display
+# fully at the default window width. Data is still populated (the hidden Ticket
+# cell backs the action-widget rebuild); compact mode manages its own set.
+_DEFAULT_HIDDEN_COLS = frozenset(
+    _COL[n] for n in ("Ticket", "SL", "TP", "Open Time")
+)
+
+# Fixed widths for the visible data columns in normal mode. Auto-fit lets the
+# headers inflate the columns and starves Actions at the 840px default window;
+# a fixed budget (~540px + stretch for Actions) keeps every column on screen.
+_NORMAL_COL_WIDTHS = {
+    "Symbol":     104,
+    "Trend":       46,
+    "Type":        52,
+    "Volume":      62,
+    "Open Price":  92,
+    "Current":     92,
+    "Profit":      95,
+}
+
 # Fixed widths used in compact mode for visible columns
 _COMPACT_COL_WIDTHS = {
     "Symbol":  104,   # wider to fit the source icon prefix
@@ -205,13 +225,11 @@ class OrdersPanel(QWidget):
         self._table.verticalHeader().setDefaultSectionSize(28)
         self._table.setShowGrid(True)
 
-        # Column sizing — all data columns auto-fit content, Actions stretches
+        # Column sizing — fixed data columns, Actions stretches to the rest
         hh = self._table.horizontalHeader()
         hh.setStretchLastSection(True)
-        hh.setMinimumSectionSize(50)
-        for col_idx, col_name in enumerate(_COLUMNS):
-            if col_name != "Actions":
-                hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setMinimumSectionSize(40)
+        self._apply_normal_columns()
 
         # Monospace font for number columns
         mono = QFont("Consolas", 11)
@@ -313,6 +331,16 @@ class OrdersPanel(QWidget):
     # Total compact content width (visible columns + Actions); caller adds chrome offset
     COMPACT_CONTENT_WIDTH = sum(_COMPACT_COL_WIDTHS.values()) + _ACTIONS_COMPACT_WIDTH
 
+    def _apply_normal_columns(self) -> None:
+        """Normal-mode column set: default-hidden columns off, fixed widths on
+        the data columns so Profit and Actions always fit on screen."""
+        hh = self._table.horizontalHeader()
+        for col_idx, col_name in enumerate(_COLUMNS):
+            self._table.setColumnHidden(col_idx, col_idx in _DEFAULT_HIDDEN_COLS)
+            if col_name in _NORMAL_COL_WIDTHS:
+                hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
+                self._table.setColumnWidth(col_idx, _NORMAL_COL_WIDTHS[col_name])
+
     def set_compact_mode(self, compact: bool) -> None:
         self._compact = compact
         self._title_label.setVisible(not compact)
@@ -321,27 +349,22 @@ class OrdersPanel(QWidget):
         self._compact_pl_lbl.setVisible(compact)
         hh = self._table.horizontalHeader()
 
-        for col_idx, col_name in enumerate(_COLUMNS):
-            hidden = compact and col_idx in _COMPACT_HIDDEN_COLS
-            self._table.setColumnHidden(col_idx, hidden)
-            if hidden:
-                self._table.setColumnWidth(col_idx, 0)
-            elif col_name == "Actions":
-                pass  # handled separately below
-            elif compact and col_name in _COMPACT_COL_WIDTHS:
-                # Switch to Fixed so column width doesn't shift with live data
-                hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
-                self._table.setColumnWidth(col_idx, _COMPACT_COL_WIDTHS[col_name])
-            elif not compact:
-                # Restore auto-fit for normal mode
-                hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.ResizeToContents)
-
         if compact:
+            for col_idx, col_name in enumerate(_COLUMNS):
+                hidden = col_idx in _COMPACT_HIDDEN_COLS
+                self._table.setColumnHidden(col_idx, hidden)
+                if hidden:
+                    self._table.setColumnWidth(col_idx, 0)
+                elif col_name in _COMPACT_COL_WIDTHS:
+                    # Fixed so column width doesn't shift with live data
+                    hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
+                    self._table.setColumnWidth(col_idx, _COMPACT_COL_WIDTHS[col_name])
             hh.setStretchLastSection(False)
             self._table.setColumnWidth(self._ACTIONS_COL, self._ACTIONS_COMPACT_WIDTH)
             # Hide scrollbar so it doesn't reserve space and leave a gap
             self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         else:
+            self._apply_normal_columns()
             hh.setStretchLastSection(True)
             self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
