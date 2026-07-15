@@ -349,24 +349,30 @@ class OrdersPanel(QWidget):
         self._compact_pl_lbl.setVisible(compact)
         hh = self._table.horizontalHeader()
 
+        # NOTE: toggle stretchLastSection BEFORE hiding/resizing columns —
+        # toggling it afterwards makes QHeaderView resurrect hidden columns'
+        # widths in its layout, pushing Profit/Actions off the window.
         if compact:
+            hh.setStretchLastSection(False)
+            # Pin every section to Fixed so widths can't shift with live data
             for col_idx, col_name in enumerate(_COLUMNS):
                 hidden = col_idx in _COMPACT_HIDDEN_COLS
                 self._table.setColumnHidden(col_idx, hidden)
+                hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
                 if hidden:
                     self._table.setColumnWidth(col_idx, 0)
                 elif col_name in _COMPACT_COL_WIDTHS:
-                    # Fixed so column width doesn't shift with live data
-                    hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
                     self._table.setColumnWidth(col_idx, _COMPACT_COL_WIDTHS[col_name])
-            hh.setStretchLastSection(False)
             self._table.setColumnWidth(self._ACTIONS_COL, self._ACTIONS_COMPACT_WIDTH)
-            # Hide scrollbar so it doesn't reserve space and leave a gap
+            # No scrollbars in compact: vertical would leave a gap, horizontal
+            # would steal a row of height when rounding runs 1-2px over
             self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         else:
-            self._apply_normal_columns()
             hh.setStretchLastSection(True)
+            self._apply_normal_columns()
             self._table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         self._rebuild_action_widgets()
 

@@ -799,7 +799,9 @@ class MainWindow(QMainWindow):
             self.setWindowFlags(base | Qt.WindowType.WindowMinimizeButtonHint |
                                 Qt.WindowType.WindowStaysOnTopHint)
             self.show()
-            compact_w = self._orders_panel.COMPACT_CONTENT_WIDTH + 18
+            # +26 = layout margins/borders plus slack so the last button never
+            # clips when DPI scaling rounds column widths up a pixel or two
+            compact_w = self._orders_panel.COMPACT_CONTENT_WIDTH + 26
             self.setFixedWidth(compact_w)
             self.setMinimumHeight(198)
             self.setMaximumHeight(16777215)
