@@ -154,8 +154,11 @@ class TradePlanPanel(QWidget):
     or a manual amount the user sets."""
 
     dd_pct_changed    = Signal(int)
+    target_pct_changed = Signal(int)          # target as % of the drawdown limit
     target_changed    = Signal(bool, float)   # (manual_enabled, amount)
     refresh_requested = Signal()
+
+    DEFAULT_TARGET_PCT = 200   # 2x the drawdown limit
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -235,11 +238,30 @@ class TradePlanPanel(QWidget):
         dd_lay.addWidget(self._dd_sub)
         cards.addWidget(self._dd_card, 1)
 
-        # Target card (mint) — auto 2x limit, or manual amount
+        # Target card (mint) — % of the drawdown limit, or a manual amount
         self._target_card, tgt_lay = self._make_card(COLORS["mint"], "#2d4a41")
         tgt_lay.addWidget(self._card_key("🎯  TODAY'S TARGET"))
         self._target_val = self._card_value(COLORS["mint"])
         tgt_lay.addWidget(self._target_val)
+
+        # Target-percentage slider (of the drawdown limit) — active unless manual
+        tgt_slider_row = QHBoxLayout()
+        tgt_slider_row.setSpacing(8)
+        self._tgt_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tgt_slider.setRange(50, 500)
+        self._tgt_slider.setSingleStep(10)
+        self._tgt_slider.setPageStep(25)
+        self._tgt_slider.setValue(self.DEFAULT_TARGET_PCT)
+        self._tgt_slider.valueChanged.connect(self._on_target_pct_changed)
+        tgt_slider_row.addWidget(self._tgt_slider, 1)
+        self._tgt_pct_lbl = QLabel(f"{self.DEFAULT_TARGET_PCT}%")
+        self._tgt_pct_lbl.setStyleSheet(
+            f"color: {COLORS['peach']}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; background: transparent;"
+        )
+        self._tgt_pct_lbl.setFixedWidth(44)
+        tgt_slider_row.addWidget(self._tgt_pct_lbl)
+        tgt_lay.addLayout(tgt_slider_row)
 
         manual_row = QHBoxLayout()
         manual_row.setSpacing(8)
@@ -256,7 +278,7 @@ class TradePlanPanel(QWidget):
         manual_row.addWidget(self._manual_spin, 1)
         tgt_lay.addLayout(manual_row)
 
-        self._target_sub = self._card_sub("2× the drawdown limit — risk X to make 2X")
+        self._target_sub = self._card_sub("drag to set target as % of the drawdown limit")
         tgt_lay.addWidget(self._target_sub)
         cards.addWidget(self._target_card, 1)
 
@@ -370,12 +392,18 @@ class TradePlanPanel(QWidget):
         self._recompute()
         self.dd_pct_changed.emit(value)
 
+    def _on_target_pct_changed(self, value: int) -> None:
+        self._tgt_pct_lbl.setText(f"{value}%")
+        self._recompute()
+        self.target_pct_changed.emit(value)
+
     def _on_manual_toggled(self, checked: bool) -> None:
         self._manual_spin.setEnabled(checked)
+        self._tgt_slider.setEnabled(not checked)   # slider drives the auto target
         # Seed an empty manual amount with the current auto target so the
         # user starts from something sensible instead of $0
         if checked and self._manual_spin.value() <= 0 and self._base is not None:
-            auto = tp.profit_target(tp.drawdown_limit(self._base.profit, self._dd_slider.value()))
+            auto = self._auto_target(tp.drawdown_limit(self._base.profit, self._dd_slider.value()))
             self._manual_spin.setValue(round(auto, 2))
         self._recompute()
         self.target_changed.emit(checked, self._manual_spin.value())
@@ -390,6 +418,12 @@ class TradePlanPanel(QWidget):
 
     def dd_pct(self) -> int:
         return self._dd_slider.value()
+
+    def set_target_pct(self, pct: int) -> None:
+        self._tgt_slider.setValue(max(50, min(500, int(pct))))
+
+    def target_pct(self) -> int:
+        return self._tgt_slider.value()
 
     def set_target_config(self, manual: bool, amount: float) -> None:
         """Restore the persisted manual-target setting."""
@@ -434,10 +468,14 @@ class TradePlanPanel(QWidget):
             f" font-family: Consolas, monospace; background: transparent;"
         )
 
+    def _auto_target(self, limit: float) -> float:
+        """Target from the slider percentage of the drawdown limit."""
+        return limit * self._tgt_slider.value() / 100.0
+
     def _effective_target(self, limit: float) -> float:
         if self._manual_chk.isChecked():
             return self._manual_spin.value()
-        return tp.profit_target(limit)
+        return self._auto_target(limit)
 
     def _recompute(self) -> None:
         pct = self._dd_slider.value()
@@ -473,8 +511,8 @@ class TradePlanPanel(QWidget):
         self._dd_sub.setText(f"stop trading if today ≤ −${limit:,.2f}")
         self._target_val.setText(f"+${target:,.2f}")
         self._target_sub.setText(
-            "your own number — the 2× rule is off" if self._manual_chk.isChecked()
-            else "2× the drawdown limit — risk X to make 2X"
+            "your own number — the % slider is off" if self._manual_chk.isChecked()
+            else f"{self._tgt_slider.value()}% of the drawdown limit"
         )
 
         self._set_money_label(self._realized_lbl, self._realized)
@@ -492,7 +530,8 @@ class TradePlanPanel(QWidget):
             f"+${gain:,.2f} / +${target:,.2f}",
         )
 
-        mode = "manual target" if self._manual_chk.isChecked() else "2× rule"
+        mode = ("manual target" if self._manual_chk.isChecked()
+                else f"{self._tgt_slider.value()}% target")
         self._note.setText(
             f"Plan: risk up to {pct}% of {self._base.day}'s profit "
             f"(${base:,.2f}) to make ${target:,.2f}  ·  {mode}"
