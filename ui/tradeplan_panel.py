@@ -85,6 +85,14 @@ _BANNER = {
 }
 
 
+def _v_divider() -> QFrame:
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.VLine)
+    line.setFixedWidth(1)
+    line.setStyleSheet(f"background-color: {COLORS['accent']}; border: none;")
+    return line
+
+
 class ProgressDonut(QWidget):
     """Donut progress chart: pastel arc, big % in the center, caption and
     value line underneath."""
@@ -156,9 +164,11 @@ class TradePlanPanel(QWidget):
     dd_pct_changed    = Signal(int)
     target_pct_changed = Signal(int)          # target as % of the drawdown limit
     target_changed    = Signal(bool, float)   # (manual_enabled, amount)
+    risk_pct_changed  = Signal(int)           # per-trade risk, in tenths of a %
     refresh_requested = Signal()
 
     DEFAULT_TARGET_PCT = 200   # 2x the drawdown limit
+    DEFAULT_RISK_TENTHS = 10   # 1.0% of balance per trade
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -167,6 +177,7 @@ class TradePlanPanel(QWidget):
         self._searched = False       # a refresh ran but found no profitable day
         self._realized = 0.0
         self._floating = 0.0
+        self._balance = 0.0
         self._build_ui()
         self._recompute()
 
@@ -176,8 +187,63 @@ class TradePlanPanel(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
+
+        # ---- per-trade risk calculator ----
+        calc = QFrame()
+        calc.setStyleSheet(
+            f"QFrame {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
+            f" stop:0 #2a2b40, stop:1 {COLORS['panel']});"
+            f" border: 1px solid {COLORS['peach']}; border-radius: 10px; }}"
+        )
+        calc_lay = QVBoxLayout(calc)
+        calc_lay.setContentsMargins(16, 8, 16, 10)
+        calc_lay.setSpacing(6)
+
+        head = QHBoxLayout()
+        head.addWidget(self._card_key("⚖️  PER-TRADE RISK CALCULATOR"))
+        head.addStretch()
+        self._bal_lbl = QLabel("Balance —")
+        self._bal_lbl.setStyleSheet(
+            f"color: {COLORS['subtext']}; font-size: 11px; font-weight: bold;"
+            f" font-family: Consolas, monospace; background: transparent;"
+        )
+        head.addWidget(self._bal_lbl)
+        calc_lay.addLayout(head)
+
+        risk_row = QHBoxLayout()
+        risk_row.setSpacing(8)
+        risk_cap = QLabel("Risk / trade")
+        risk_cap.setObjectName("cardSub")
+        risk_cap.setFixedWidth(72)
+        risk_row.addWidget(risk_cap)
+        self._risk_slider = QSlider(Qt.Orientation.Horizontal)
+        self._risk_slider.setRange(1, 200)   # tenths of a % → 0.1%–20.0%
+        self._risk_slider.setSingleStep(1)
+        self._risk_slider.setPageStep(5)
+        self._risk_slider.setValue(self.DEFAULT_RISK_TENTHS)
+        self._risk_slider.valueChanged.connect(self._on_risk_pct_changed)
+        risk_row.addWidget(self._risk_slider, 1)
+        self._risk_pct_lbl = QLabel("1.0%")
+        self._risk_pct_lbl.setStyleSheet(
+            f"color: {COLORS['peach']}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; background: transparent;"
+        )
+        self._risk_pct_lbl.setFixedWidth(48)
+        risk_row.addWidget(self._risk_pct_lbl)
+        calc_lay.addLayout(risk_row)
+
+        results = QHBoxLayout()
+        results.setSpacing(10)
+        self._risk_amt_lbl = self._calc_stat(results, "RISK / TRADE", COLORS["peach"])
+        results.addWidget(_v_divider())
+        self._trades_target_lbl = self._calc_stat(results, "TRADES → TARGET", COLORS["mint"])
+        results.addWidget(_v_divider())
+        self._trades_dd_lbl = self._calc_stat(results, "TRADES → MAX DD", COLORS["coral"])
+        calc_lay.addLayout(results)
+
+        layout.addWidget(calc)
 
         # ---- status banner ----
         self._banner = QFrame()
@@ -366,6 +432,24 @@ class TradePlanPanel(QWidget):
         return lbl
 
     @staticmethod
+    def _calc_stat(row: QHBoxLayout, key: str, color: str) -> QLabel:
+        block = QVBoxLayout()
+        block.setSpacing(0)
+        k = QLabel(key)
+        k.setObjectName("cardKey")
+        k.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        v = QLabel("—")
+        v.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        v.setStyleSheet(
+            f"color: {color}; font-size: 19px; font-weight: bold;"
+            f" font-family: Consolas, monospace; background: transparent;"
+        )
+        block.addWidget(k)
+        block.addWidget(v)
+        row.addLayout(block, 1)
+        return v
+
+    @staticmethod
     def _stat_block(row: QHBoxLayout, key: str) -> QLabel:
         block = QVBoxLayout()
         block.setSpacing(0)
@@ -397,6 +481,11 @@ class TradePlanPanel(QWidget):
         self._recompute()
         self.target_pct_changed.emit(value)
 
+    def _on_risk_pct_changed(self, tenths: int) -> None:
+        self._risk_pct_lbl.setText(f"{tenths / 10:.1f}%")
+        self._recompute()
+        self.risk_pct_changed.emit(tenths)
+
     def _on_manual_toggled(self, checked: bool) -> None:
         self._manual_spin.setEnabled(checked)
         self._tgt_slider.setEnabled(not checked)   # slider drives the auto target
@@ -425,6 +514,12 @@ class TradePlanPanel(QWidget):
     def target_pct(self) -> int:
         return self._tgt_slider.value()
 
+    def set_risk_tenths(self, tenths: int) -> None:
+        self._risk_slider.setValue(max(1, min(200, int(tenths))))
+
+    def risk_tenths(self) -> int:
+        return self._risk_slider.value()
+
     def set_target_config(self, manual: bool, amount: float) -> None:
         """Restore the persisted manual-target setting."""
         self._manual_spin.blockSignals(True)
@@ -439,9 +534,10 @@ class TradePlanPanel(QWidget):
         self._searched = True
         self._recompute()
 
-    def update_today(self, realized: float, floating: float) -> None:
+    def update_today(self, realized: float, floating: float, balance: float = 0.0) -> None:
         self._realized = realized
         self._floating = floating
+        self._balance = balance
         self._recompute()
 
     def clear(self) -> None:
@@ -449,6 +545,7 @@ class TradePlanPanel(QWidget):
         self._searched = False
         self._realized = 0.0
         self._floating = 0.0
+        self._balance = 0.0
         self._recompute()
 
     # ------------------------------------------------------------------
@@ -477,6 +574,27 @@ class TradePlanPanel(QWidget):
             return self._manual_spin.value()
         return self._auto_target(limit)
 
+    def _risk_per_trade(self) -> float:
+        """Dollar risk per trade = balance × the risk-% slider."""
+        return self._balance * self._risk_slider.value() / 10.0 / 100.0
+
+    def _update_calc(self, limit: float | None, target: float | None) -> None:
+        """Risk-per-trade amount and how many trades reach the target / hit
+        the max drawdown at that risk."""
+        self._bal_lbl.setText(
+            f"Balance ${self._balance:,.2f}" if self._balance > 0 else "Balance —"
+        )
+        risk = self._risk_per_trade()
+        self._risk_amt_lbl.setText(f"${risk:,.2f}" if risk > 0 else "—")
+
+        def trades(amount):
+            if not risk or amount is None or amount <= 0:
+                return "—"
+            return f"{amount / risk:,.1f}"
+
+        self._trades_target_lbl.setText(trades(target))
+        self._trades_dd_lbl.setText(trades(limit))
+
     def _recompute(self) -> None:
         pct = self._dd_slider.value()
 
@@ -493,6 +611,7 @@ class TradePlanPanel(QWidget):
             for lbl in (self._realized_lbl, self._floating_lbl, self._total_lbl):
                 lbl.setText("—")
             self._note.setText("")
+            self._update_calc(None, None)
             self._apply_banner("NONE")
             return
 
@@ -500,6 +619,7 @@ class TradePlanPanel(QWidget):
         limit = tp.drawdown_limit(base, pct)
         target = self._effective_target(limit)
         total = self._realized + self._floating
+        self._update_calc(limit, target)
 
         self._base_val.setText(self._money(base))
         when = f"{self._base.day}  ·  {self._base.days_ago} day(s) ago"

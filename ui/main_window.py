@@ -307,6 +307,7 @@ class MainWindow(QMainWindow):
         self._tradeplan_panel.dd_pct_changed.connect(self._on_plan_pct_changed)
         self._tradeplan_panel.target_pct_changed.connect(self._on_plan_target_pct_changed)
         self._tradeplan_panel.target_changed.connect(self._on_plan_target_changed)
+        self._tradeplan_panel.risk_pct_changed.connect(self._on_plan_risk_changed)
         self._tradeplan_panel.refresh_requested.connect(self._refresh_trade_plan)
 
         # Dashboard is the leftmost tab and the default landing view
@@ -341,6 +342,7 @@ class MainWindow(QMainWindow):
         self._ghost_panel.set_opacity_pct(int(self._ghost_opacity * 100))
         self._tradeplan_panel.set_dd_pct(int(self.settings.get("tradeplan_dd_pct", 100)))
         self._tradeplan_panel.set_target_pct(int(self.settings.get("tradeplan_target_pct", 200)))
+        self._tradeplan_panel.set_risk_tenths(int(self.settings.get("tradeplan_risk_tenths", 10)))
         self._tradeplan_panel.set_target_config(
             bool(self.settings.get("tradeplan_target_manual", False)),
             float(self.settings.get("tradeplan_target_amount", 0.0)),
@@ -653,6 +655,9 @@ class MainWindow(QMainWindow):
     def _on_plan_target_pct_changed(self, pct: int) -> None:
         self.settings.set("tradeplan_target_pct", pct)
 
+    def _on_plan_risk_changed(self, tenths: int) -> None:
+        self.settings.set("tradeplan_risk_tenths", tenths)
+
     def _on_plan_target_changed(self, manual: bool, amount: float) -> None:
         self.settings.update({
             "tradeplan_target_manual": manual,
@@ -678,7 +683,8 @@ class MainWindow(QMainWindow):
         realized = sum(e.profit for e in self.history_mgr.get_history(frm, to))
         info = self.connector.get_account_info()
         floating = info.get("profit", 0.0) if info else 0.0
-        self._tradeplan_panel.update_today(realized, floating)
+        balance = info.get("balance", 0.0) if info else 0.0
+        self._tradeplan_panel.update_today(realized, floating, balance)
 
     # ------------------------------------------------------------------
     # Slot — timezone change
