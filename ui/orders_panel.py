@@ -254,6 +254,8 @@ class OrdersPanel(QWidget):
             # Same order list — refresh the live columns (current, profit, trend);
             # leave action widgets intact
             for row, order in enumerate(orders):
+                # Volume changes on a partial close even though the ticket stays
+                self._set_item(row, _COL["Volume"], f"{order.volume:.2f}")
                 self._set_item(row, _COL["Current"], f"{order.current_price:,.{order.digits}f}")
                 self._set_profit_item(row, order.profit)
                 self._set_trend_item(row, order.trend)
