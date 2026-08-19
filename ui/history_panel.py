@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QPushButton, QAbstractItemView, QDateTimeEdit,
+    QPushButton, QAbstractItemView, QDateTimeEdit, QDateEdit, QComboBox,
 )
 from PySide6.QtCore import Qt, QDate, QDateTime, QTime, Signal
 from PySide6.QtGui import QFont, QColor, QTextCharFormat
@@ -92,16 +92,36 @@ QDateTimeEdit {{
     padding: 3px 6px;
     font-size: 12px;
 }}
-QDateTimeEdit::drop-down {{
+QDateEdit::drop-down {{
     border: none;
     background-color: {COLORS['accent']};
     width: 18px;
     border-radius: 0px 4px 4px 0px;
 }}
-QDateTimeEdit::up-button, QDateTimeEdit::down-button {{
-    background-color: {COLORS['accent']};
+QComboBox#timePicker {{
+    background-color: {COLORS['bg']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['accent']};
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+}}
+QComboBox#timePicker:hover {{
+    border: 1px solid {COLORS['btn_hover']};
+}}
+QComboBox#timePicker::drop-down {{
     border: none;
-    width: 14px;
+    background-color: {COLORS['accent']};
+    width: 18px;
+    border-radius: 0px 4px 4px 0px;
+}}
+QComboBox#timePicker QAbstractItemView {{
+    background-color: {COLORS['panel']};
+    color: {COLORS['text']};
+    border: 1px solid {COLORS['accent']};
+    selection-background-color: {COLORS['accent']};
+    selection-color: {COLORS['text']};
+    outline: none;
 }}
 QCalendarWidget {{
     background-color: {COLORS['panel']};
@@ -181,6 +201,13 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 """
 
 
+# Selectable times of day: every half hour, plus an explicit end-of-day
+# entry so a "To" filter can cover the final 29 minutes of a day.
+_TIME_SLOTS: list[QTime] = (
+    [QTime(h, m) for h in range(24) for m in (0, 30)] + [QTime(23, 59, 59)]
+)
+
+
 class HistoryPanel(QWidget):
     filter_requested = Signal(object, object)   # (from_datetime, to_datetime)
 
@@ -234,37 +261,23 @@ class HistoryPanel(QWidget):
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
 
-        from_lbl = QLabel("From:")
-        from_lbl.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 12px;")
-        filter_row.addWidget(from_lbl)
-
-        self._from_dt = QDateTimeEdit()
-        self._from_dt.setDisplayFormat("yyyy-MM-dd HH:mm")
-        self._from_dt.setCalendarPopup(True)
         default_from = datetime.now() - timedelta(days=30)
-        self._from_dt.setDateTime(QDateTime(
-            QDate(default_from.year, default_from.month, default_from.day),
-            QTime(0, 0, 0)
-        ))
-        self._from_dt.setFixedWidth(160)
-        self._setup_calendar(self._from_dt)
-        filter_row.addWidget(self._from_dt)
+        self._from_date, self._from_time = self._add_dt_picker(
+            filter_row, "From:",
+            QDateTime(
+                QDate(default_from.year, default_from.month, default_from.day),
+                QTime(0, 0, 0),
+            ),
+        )
 
-        to_lbl = QLabel("To:")
-        to_lbl.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 12px;")
-        filter_row.addWidget(to_lbl)
-
-        self._to_dt = QDateTimeEdit()
-        self._to_dt.setDisplayFormat("yyyy-MM-dd HH:mm")
-        self._to_dt.setCalendarPopup(True)
         now = datetime.now()
-        self._to_dt.setDateTime(QDateTime(
-            QDate(now.year, now.month, now.day),
-            QTime(now.hour, now.minute, 0)
-        ))
-        self._to_dt.setFixedWidth(160)
-        self._setup_calendar(self._to_dt)
-        filter_row.addWidget(self._to_dt)
+        self._to_date, self._to_time = self._add_dt_picker(
+            filter_row, "To:",
+            QDateTime(
+                QDate(now.year, now.month, now.day),
+                QTime(now.hour, now.minute, 0),
+            ),
+        )
 
         self._today_btn = QPushButton("Today")
         self._today_btn.setFixedWidth(70)
@@ -316,6 +329,47 @@ class HistoryPanel(QWidget):
     # Calendar setup
     # ------------------------------------------------------------------
 
+    def _add_dt_picker(
+        self, row: QHBoxLayout, label: str, initial: QDateTime
+    ) -> tuple[QDateEdit, QComboBox]:
+        """Add a "label [date] [time]" group to *row* and return both editors.
+
+        The time is a separate dropdown of half-hour slots rather than part
+        of a QDateTimeEdit, whose time sections are only reachable by clicking
+        into them and typing once a calendar popup is enabled.
+        """
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 12px;")
+        row.addWidget(lbl)
+
+        date_edit = QDateEdit(initial.date())
+        date_edit.setDisplayFormat("yyyy-MM-dd")
+        date_edit.setCalendarPopup(True)
+        date_edit.setFixedWidth(108)
+        self._setup_calendar(date_edit)
+        row.addWidget(date_edit)
+
+        time_box = QComboBox()
+        time_box.setObjectName("timePicker")
+        for slot in _TIME_SLOTS:
+            time_box.addItem(slot.toString("HH:mm"), slot)
+        time_box.setMaxVisibleItems(14)
+        time_box.setFixedWidth(80)
+        time_box.setToolTip("Time of day, in half-hour steps")
+        self._select_time(time_box, initial.time())
+        row.addWidget(time_box)
+
+        return date_edit, time_box
+
+    @staticmethod
+    def _select_time(box: QComboBox, t: QTime) -> None:
+        """Select *t* in a time dropdown, rounding up to the next listed slot."""
+        for i, slot in enumerate(_TIME_SLOTS):
+            if slot >= t:
+                box.setCurrentIndex(i)
+                return
+        box.setCurrentIndex(len(_TIME_SLOTS) - 1)
+
     def _setup_calendar(self, dte: QDateTimeEdit) -> None:
         cal = dte.calendarWidget()
         if cal is None:
@@ -333,8 +387,10 @@ class HistoryPanel(QWidget):
     def _on_today_clicked(self) -> None:
         now_local = convert_dt(datetime.now(timezone.utc), self._tz_name)
         today = QDate(now_local.year, now_local.month, now_local.day)
-        self._from_dt.setDateTime(QDateTime(today, QTime(0, 0, 0)))
-        self._to_dt.setDateTime(QDateTime(today, QTime(23, 59, 59)))
+        self._from_date.setDate(today)
+        self._select_time(self._from_time, QTime(0, 0, 0))
+        self._to_date.setDate(today)
+        self._select_time(self._to_time, QTime(23, 59, 59))
         self._on_filter_clicked()
 
     def clear(self) -> None:
@@ -345,8 +401,8 @@ class HistoryPanel(QWidget):
         self._summary_label.setText("Total: 0 | Wins: 0 | Losses: 0 | Net P/L: $0.00")
 
     def _on_filter_clicked(self) -> None:
-        from_naive = self._from_dt.dateTime().toPython()
-        to_naive   = self._to_dt.dateTime().toPython()
+        from_naive = QDateTime(self._from_date.date(), self._from_time.currentData()).toPython()
+        to_naive   = QDateTime(self._to_date.date(),   self._to_time.currentData()).toPython()
         # Localize picker values to the selected timezone so MT5 query uses correct UTC range
         from_aware = localize_naive(from_naive, self._tz_name)
         to_aware   = localize_naive(to_naive,   self._tz_name)
