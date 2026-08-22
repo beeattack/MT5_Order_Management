@@ -10,9 +10,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
 
+from core import entry_signal as es
 from core import trend_detector as td
 from core.watchlist import (
     TIMEFRAMES, TIMEFRAME_LABELS, ALERT_TIMEFRAMES, CONFLUENCE_LABEL,
+    ENTRY_COOLDOWN_BARS,
 )
 
 COLORS = {
@@ -104,7 +106,7 @@ class WatchlistPanel(QWidget):
         layout.setContentsMargins(10, 6, 10, 8)
         layout.setSpacing(6)
 
-        title = QLabel("Watchlist — trend alerts")
+        title = QLabel("Watchlist — trend & entry alerts")
         title.setObjectName("panelTitle")
         layout.addWidget(title)
 
@@ -260,7 +262,30 @@ only — the still-forming bar is ignored.
 Alerts (sound + desktop + MT5) fire only when a timeframe **changes** into a
 clear ▲ / ▼ trend — and only for **{", ".join(ALERT_TIMEFRAMES)}** (M1/M5
 flip too often). A **confluence alert** fires when **{CONFLUENCE_LABEL}**
-all align in the same clear direction."""
+all align in the same clear direction.
+
+---
+
+## Entry signal (⚑)
+
+Separate from the trend cells: flags the bar where a **pullback inside an
+established trend ends** — a good moment to enter *with* the trend.
+
+**⚑B BUY** needs all of:
+- **ADX({es.ADX_PERIOD}) ≥ {es.ADX_THRESHOLD:.0f}** and **+DI &gt; −DI** — trending up
+- **RSI({es.SLOW_RSI_PERIOD}) &gt; 50** — slow momentum bias intact
+- **RSI({es.FAST_RSI_PERIOD})** dipped to **≤ {es.PULLBACK_BUY:.0f}** within the last
+  {es.PULLBACK_LOOKBACK} bars — a real pullback happened
+- **RSI({es.FAST_RSI_PERIOD})** crosses back **above {es.RECOVERY_BUY:.0f}** on this bar,
+  while still **below {es.OVEREXTENDED_BUY:.0f}** — recovery just started, not chased
+
+**⚑S SELL** is the mirror (spike ≥ {es.PULLBACK_SELL:.0f}, cross below
+{es.RECOVERY_SELL:.0f}, RSI({es.SLOW_RSI_PERIOD}) &lt; 50, −DI dominant).
+
+The flag stays on the cell while the signal bar is the latest closed bar.
+Alerts fire once per signal bar for **{", ".join(ALERT_TIMEFRAMES)}**, with a
+{ENTRY_COOLDOWN_BARS}-bar cooldown against immediate re-crosses. This times
+*continuation* entries — the trend-change alert above covers trend starts."""
 
         dialog = QDialog(self)
         dialog.setWindowTitle("How trend is derived")
@@ -329,13 +354,16 @@ all align in the same clear direction."""
         remove_btn.clicked.connect(lambda _=False, s=symbol: self.remove_requested.emit(s))
         self._table.setCellWidget(row, _REMOVE_COL, remove_btn)
 
-    def update_row(self, symbol: str, readings: dict) -> None:
-        """readings: {timeframe_name: TrendReading} for this symbol."""
+    def update_row(self, symbol: str, readings: dict, entries: dict | None = None) -> None:
+        """readings: {timeframe_name: TrendReading}; entries: {timeframe_name:
+        EntryReading} — both for this symbol."""
         row = self._row_of.get(symbol)
         if row is None:
             return
+        entries = entries or {}
         for i, tf_name in enumerate(TIMEFRAMES):
-            self._set_trend_cell(row, _TF_COL_START + i, tf_name, readings.get(tf_name))
+            self._set_trend_cell(row, _TF_COL_START + i, tf_name,
+                                 readings.get(tf_name), entries.get(tf_name))
         self._set_align_cell(row, readings)
         self._set_num(row, _UPDATED_COL, datetime.now().strftime("%H:%M:%S"))
 
@@ -346,16 +374,32 @@ all align in the same clear direction."""
         td.UNKNOWN: "No data yet",
     }
 
-    def _set_trend_cell(self, row: int, col: int, tf_name: str, reading) -> None:
+    def _set_trend_cell(self, row: int, col: int, tf_name: str, reading,
+                        entry=None) -> None:
         state = reading.state if reading is not None else td.UNKNOWN
-        item = QTableWidgetItem(_STATE_SHORT.get(state, "—"))
+        text = _STATE_SHORT.get(state, "—")
+        signal = entry is not None and entry.is_signal
+        if signal:
+            # flag stays visible while the signal bar is the last closed bar
+            text += "  ⚑" + ("B" if entry.state == es.BUY else "S")
+        item = QTableWidgetItem(text)
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setForeground(QColor(_STATE_COLOR.get(state, COLORS["subtext"])))
+        if signal:
+            item.setBackground(QColor(30, 80, 60) if entry.state == es.BUY
+                               else QColor(90, 45, 40))
         f = QFont("Consolas", 11)
-        f.setBold(state in (td.UP, td.DOWN))
+        f.setBold(state in (td.UP, td.DOWN) or signal)
         item.setFont(f)
-        item.setToolTip(self._trend_tooltip(tf_name, reading))
+        tip = self._trend_tooltip(tf_name, reading)
+        if signal:
+            tip += (
+                f"\n\n⚑ {entry.state} ENTRY — pullback just ended\n"
+                f"RSI{es.FAST_RSI_PERIOD}  {entry.rsi_fast:.1f}   "
+                f"RSI{es.SLOW_RSI_PERIOD}  {entry.rsi_slow:.1f}"
+            )
+        item.setToolTip(tip)
         self._table.setItem(row, col, item)
 
     def _trend_tooltip(self, tf_name: str, reading) -> str:
@@ -423,6 +467,15 @@ all align in the same clear direction."""
         self._log.append(
             f"[{stamp}] 🔔 {symbol} [{tf_label}]: clear {word} "
             f"(ADX {reading.adx:.0f}) — possible entry"
+        )
+
+    def log_entry_alert(self, symbol: str, timeframe: str, entry) -> None:
+        stamp = datetime.now().strftime("%H:%M:%S")
+        tf_label = TIMEFRAME_LABELS.get(timeframe, timeframe)
+        self._log.append(
+            f"[{stamp}] ⚑ {symbol} [{tf_label}]: {entry.state} entry — "
+            f"pullback ended (RSI{es.FAST_RSI_PERIOD} {entry.rsi_fast:.0f}, "
+            f"RSI{es.SLOW_RSI_PERIOD} {entry.rsi_slow:.0f}, ADX {entry.adx:.0f})"
         )
 
     def log_message(self, text: str) -> None:

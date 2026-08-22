@@ -240,6 +240,7 @@ class MainWindow(QMainWindow):
             self.connector,
             update_cb=self._watchlist_panel.update_row,
             alert_cb=self._on_watch_alert,
+            entry_alert_cb=self._on_entry_alert,
         )
         # reflect the persisted watchlist in the panel
         self._watchlist_panel.load_config(
@@ -601,6 +602,16 @@ class MainWindow(QMainWindow):
         self._watchlist_panel.log_alert(symbol, timeframe, reading)
         msg = f"{timeframe} clear {reading.state} trend (ADX {reading.adx:.0f}) - possible entry"
         self._notify(f"Trend Alert — {symbol} [{timeframe}]", msg)
+        mt5_alert_bridge.write_alert(f"{symbol} {timeframe}: {msg}")
+        if not self.watchlist.muted:
+            play_alert()
+
+    def _on_entry_alert(self, symbol: str, timeframe: str, entry) -> None:
+        self._watchlist_panel.log_entry_alert(symbol, timeframe, entry)
+        msg = (f"{timeframe} {entry.state} entry - pullback ended "
+               f"(RSI9 {entry.rsi_fast:.0f}, RSI14 {entry.rsi_slow:.0f}, "
+               f"ADX {entry.adx:.0f})")
+        self._notify(f"Entry Alert - {symbol} [{timeframe}]", msg)
         mt5_alert_bridge.write_alert(f"{symbol} {timeframe}: {msg}")
         if not self.watchlist.muted:
             play_alert()

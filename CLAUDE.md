@@ -46,5 +46,6 @@ The app connects to a locally running MT5 terminal (detected via `psutil` proces
 - **Price display**: prices are formatted with the symbol's `digits` (carried on `Order`/`HistoryEntry`), so 5-digit forex pairs and 2-digit metals both render correctly.
 - **History stats**: profit and win/loss use the closing deal's net result (`profit + commission + swap + fee`). Open time/price come from the position's first entry deal (matched via `position_id`); a per-position lookup happens only when the entry falls outside the queried range.
 - **Current price**: BUY positions show `tick.bid` (close price), SELL positions show `tick.ask` — not `price_current` from the position struct, which can lag.
+- **Watchlist signals**: `core/trend_detector.py` classifies trend per timeframe (ADX + DI/EMA + RSI, with hysteresis); `core/entry_signal.py` flags pullback-end entries (dual RSI 9/14 + ADX/DI). Both are pure functions of closed bars. Entry alerts are deduped on the signal bar's open time with a bar-based cooldown in `WatchlistMonitor`.
 - **Global QSS**: all styling is defined in `COLORS` dict and `_GLOBAL_QSS` in `main_window.py` — no per-widget stylesheets elsewhere.
 - **MT5 import guard**: both `mt5_connector.py` and `order_manager.py` guard the `import MetaTrader5` with try/except so the app launches on machines without MT5 installed (shows appropriate error states).

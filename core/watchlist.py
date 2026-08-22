@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 
-from core import trend_detector
+from core import entry_signal, trend_detector
 
 try:
     import MetaTrader5 as mt5
@@ -37,6 +37,15 @@ ALERT_TIMEFRAMES = ("M15", "M30", "H1", "H4", "D1")
 CONFLUENCE_TFS = ("M15", "M30", "H1")
 CONFLUENCE_LABEL = "M15+M30+H1"
 
+# Entry-signal alerts: a signal bar keeps re-evaluating true until the next
+# bar closes, so alerts are deduped on the signal bar's open time; the
+# cooldown also silences a re-cross within the next few bars.
+ENTRY_COOLDOWN_BARS = 5
+TF_SECONDS = {
+    "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+    "H1": 3600, "H4": 14400, "D1": 86400,
+}
+
 _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".mt5_order_manager")
 _CONFIG_PATH = os.path.join(_CONFIG_DIR, "watchlist.json")
 
@@ -59,10 +68,12 @@ def market_watch_symbols() -> list[str]:
 
 
 class WatchlistMonitor:
-    def __init__(self, connector, update_cb=None, alert_cb=None) -> None:
+    def __init__(self, connector, update_cb=None, alert_cb=None,
+                 entry_alert_cb=None) -> None:
         self.connector = connector
-        self.update_cb = update_cb or (lambda sym, readings: None)
+        self.update_cb = update_cb or (lambda sym, readings, entries: None)
         self.alert_cb = alert_cb or (lambda sym, tf, reading: None)
+        self.entry_alert_cb = entry_alert_cb or (lambda sym, tf, entry: None)
 
         self.symbols: list[str] = []
         self.muted: bool = False
@@ -73,6 +84,8 @@ class WatchlistMonitor:
         self._last_state: dict[tuple[str, str], str] = {}
         # symbol -> last confluence direction ("UP"/"DOWN"/"NONE"), same pattern
         self._last_confluence: dict[str, str] = {}
+        # (symbol, timeframe) -> open time of the last alerted entry-signal bar
+        self._last_entry_bar: dict[tuple[str, str], float] = {}
         self.load()
 
     # ------------------------------------------------------------------
@@ -92,6 +105,8 @@ class WatchlistMonitor:
             self.symbols.remove(symbol)
             for key in [k for k in self._last_state if k[0] == symbol]:
                 self._last_state.pop(key, None)
+            for key in [k for k in self._last_entry_bar if k[0] == symbol]:
+                self._last_entry_bar.pop(key, None)
             self._last_confluence.pop(symbol, None)
             self.save()
 
@@ -116,9 +131,11 @@ class WatchlistMonitor:
                 pass
 
             readings: dict[str, trend_detector.TrendReading] = {}
+            entries: dict[str, entry_signal.EntryReading] = {}
             for tf_name in TIMEFRAMES:
-                reading = self._read(sym, tf_name)
+                reading, entry, bar_time = self._read(sym, tf_name)
                 readings[tf_name] = reading
+                entries[tf_name] = entry
 
                 # Alert only on a genuine transition into a clear trend. The
                 # first evaluation of each (symbol, timeframe) just seeds the
@@ -131,8 +148,19 @@ class WatchlistMonitor:
                     self.alert_cb(sym, tf_name, reading)
                 self._last_state[key] = reading.state
 
+                # Entry alert: no silent seeding (a fresh signal on a newly
+                # added symbol is still actionable), but the same signal bar
+                # must not re-alert every poll and a re-cross a bar or two
+                # later stays quiet (cooldown).
+                if entry.is_signal and tf_name in ALERT_TIMEFRAMES:
+                    last = self._last_entry_bar.get(key)
+                    min_gap = ENTRY_COOLDOWN_BARS * TF_SECONDS[tf_name]
+                    if last is None or bar_time - last >= min_gap:
+                        self.entry_alert_cb(sym, tf_name, entry)
+                        self._last_entry_bar[key] = bar_time
+
             self._check_confluence(sym, readings)
-            self.update_cb(sym, readings)
+            self.update_cb(sym, readings, entries)
 
     def _check_confluence(self, sym: str, readings: dict) -> None:
         """Fire one alert when CONFLUENCE_TFS first all align in a clear
@@ -147,22 +175,31 @@ class WatchlistMonitor:
             self.alert_cb(sym, CONFLUENCE_LABEL, readings[CONFLUENCE_TFS[-1]])
         self._last_confluence[sym] = conf
 
-    def _read(self, sym: str, tf_name: str) -> trend_detector.TrendReading:
-        """Trend reading for one symbol on one timeframe (closed bars only)."""
+    def _read(self, sym: str, tf_name: str):
+        """Trend + entry readings for one symbol on one timeframe (closed bars
+        only). Returns (TrendReading, EntryReading, signal_bar_open_time)."""
         nan = float("nan")
+        no_data = (
+            trend_detector.TrendReading(trend_detector.UNKNOWN, nan, nan, nan),
+            entry_signal.EntryReading(),
+            0.0,
+        )
         tf = _tf_constant(tf_name)
         if tf is None:
-            return trend_detector.TrendReading(trend_detector.UNKNOWN, nan, nan, nan)
+            return no_data
         try:
             rates = mt5.copy_rates_from_pos(sym, tf, 0, self.lookback)
         except Exception:
             rates = None
         if rates is None or len(rates) < 2:
-            return trend_detector.TrendReading(trend_detector.UNKNOWN, nan, nan, nan)
+            return no_data
+        closed = rates[:-1]   # drop the still-forming bar
         # prev_state enables the detector's hysteresis (hold thresholds)
-        return trend_detector.detect(
-            rates[:-1], prev_state=self._last_state.get((sym, tf_name))
+        trend = trend_detector.detect(
+            closed, prev_state=self._last_state.get((sym, tf_name))
         )
+        entry = entry_signal.detect_entry(closed)
+        return trend, entry, float(closed[-1]["time"])
 
     # ------------------------------------------------------------------
     # Persistence
