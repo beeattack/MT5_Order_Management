@@ -118,10 +118,31 @@ class WatchlistMonitor:
     # Monitoring
     # ------------------------------------------------------------------
 
+    def can_scan(self) -> bool:
+        """Whether a scan could run right now (MT5 present and connected)."""
+        return (MT5_AVAILABLE and self.connector is not None
+                and self.connector.is_connected())
+
     def on_tick(self) -> None:
-        if not self.enabled or not MT5_AVAILABLE:
-            return
-        if self.connector is None or not self.connector.is_connected():
+        if self.enabled:
+            self._scan(alerts=True)
+
+    def refresh_now(self) -> int:
+        """Re-read every symbol on demand, outside the watch timer. Returns the
+        number of symbols scanned, or -1 if MT5 isn't connected.
+
+        Alerts only fire when watching is on: a manual refresh with the watch
+        stopped is a look at the current state, not a reason to sound. Alert
+        baselines are still updated so a later transition is measured against
+        what was just displayed — except the entry-signal bar, which is left
+        untouched so a live signal still alerts once watching starts."""
+        if not self.can_scan():
+            return -1
+        self._scan(alerts=self.enabled)
+        return len(self.symbols)
+
+    def _scan(self, alerts: bool) -> None:
+        if not self.can_scan():
             return
 
         for sym in list(self.symbols):
@@ -143,8 +164,8 @@ class WatchlistMonitor:
                 # on several timeframes doesn't fire a burst of alerts at once.
                 key = (sym, tf_name)
                 prev = self._last_state.get(key)
-                if (prev is not None and reading.is_clear and reading.state != prev
-                        and tf_name in ALERT_TIMEFRAMES):
+                if (alerts and prev is not None and reading.is_clear
+                        and reading.state != prev and tf_name in ALERT_TIMEFRAMES):
                     self.alert_cb(sym, tf_name, reading)
                 self._last_state[key] = reading.state
 
@@ -152,17 +173,17 @@ class WatchlistMonitor:
                 # added symbol is still actionable), but the same signal bar
                 # must not re-alert every poll and a re-cross a bar or two
                 # later stays quiet (cooldown).
-                if entry.is_signal and tf_name in ALERT_TIMEFRAMES:
+                if alerts and entry.is_signal and tf_name in ALERT_TIMEFRAMES:
                     last = self._last_entry_bar.get(key)
                     min_gap = ENTRY_COOLDOWN_BARS * TF_SECONDS[tf_name]
                     if last is None or bar_time - last >= min_gap:
                         self.entry_alert_cb(sym, tf_name, entry)
                         self._last_entry_bar[key] = bar_time
 
-            self._check_confluence(sym, readings)
+            self._check_confluence(sym, readings, alerts)
             self.update_cb(sym, readings, entries)
 
-    def _check_confluence(self, sym: str, readings: dict) -> None:
+    def _check_confluence(self, sym: str, readings: dict, alerts: bool = True) -> None:
         """Fire one alert when CONFLUENCE_TFS first all align in a clear
         direction (transition-based, seeded silently like per-TF alerts)."""
         states = {readings[tf].state for tf in CONFLUENCE_TFS}
@@ -171,7 +192,7 @@ class WatchlistMonitor:
         else:
             conf = "NONE"
         prev = self._last_confluence.get(sym)
-        if prev is not None and conf != "NONE" and conf != prev:
+        if alerts and prev is not None and conf != "NONE" and conf != prev:
             self.alert_cb(sym, CONFLUENCE_LABEL, readings[CONFLUENCE_TFS[-1]])
         self._last_confluence[sym] = conf
 

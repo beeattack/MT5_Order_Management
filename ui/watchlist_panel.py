@@ -44,6 +44,11 @@ _STATE_SHORT = {
     td.CHOPPY:  "~",
     td.UNKNOWN: "—",
 }
+# Shown in place of the trend label on the bar an entry signal fires
+_ENTRY_SHORT = {
+    es.BUY:  "⚑ BUY",
+    es.SELL: "⚑ SELL",
+}
 
 # One column per timeframe, each showing that symbol's trend on that timeframe,
 # plus an Align column summarising how many timeframes agree.
@@ -90,6 +95,7 @@ class WatchlistPanel(QWidget):
     watch_toggled        = Signal(bool)
     mute_toggled         = Signal(bool)
     test_sound_requested = Signal()
+    refresh_requested    = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -142,6 +148,14 @@ class WatchlistPanel(QWidget):
         self._mute_btn.setFixedWidth(120)
         self._mute_btn.toggled.connect(self._on_mute)
         ctrl.addWidget(self._mute_btn)
+
+        self._refresh_btn = QPushButton("↻ Refresh")
+        self._refresh_btn.setFixedWidth(100)
+        self._refresh_btn.setToolTip(
+            "Re-read every symbol now, without waiting for the next poll"
+        )
+        self._refresh_btn.clicked.connect(self.refresh_requested)
+        ctrl.addWidget(self._refresh_btn)
 
         test_btn = QPushButton("Test")
         test_btn.setFixedWidth(60)
@@ -282,7 +296,9 @@ established trend ends** — a good moment to enter *with* the trend.
 **⚑S SELL** is the mirror (spike ≥ {es.PULLBACK_SELL:.0f}, cross below
 {es.RECOVERY_SELL:.0f}, RSI({es.SLOW_RSI_PERIOD}) &lt; 50, −DI dominant).
 
-The flag stays on the cell while the signal bar is the latest closed bar.
+While the signal bar is the latest closed bar the cell shows **⚑ BUY** /
+**⚑ SELL** in place of its ▲ / ▼ trend label — hover for the trend it
+fired inside.
 Alerts fire once per signal bar for **{", ".join(ALERT_TIMEFRAMES)}**, with a
 {ENTRY_COOLDOWN_BARS}-bar cooldown against immediate re-crosses. This times
 *continuation* entries — the trend-change alert above covers trend starts."""
@@ -377,15 +393,22 @@ Alerts fire once per signal bar for **{", ".join(ALERT_TIMEFRAMES)}**, with a
     def _set_trend_cell(self, row: int, col: int, tf_name: str, reading,
                         entry=None) -> None:
         state = reading.state if reading is not None else td.UNKNOWN
-        text = _STATE_SHORT.get(state, "—")
         signal = entry is not None and entry.is_signal
         if signal:
-            # flag stays visible while the signal bar is the last closed bar
-            text += "  ⚑" + ("B" if entry.state == es.BUY else "S")
+            # An entry signal takes the cell over from the trend arrow while
+            # its bar is the last closed one — it's the actionable reading,
+            # and the trend it fired inside stays in the tooltip. Colored by
+            # the entry's own direction, which can differ from the trend
+            # state (the entry rules don't use the EMA/RSI-band filters).
+            text = _ENTRY_SHORT[entry.state]
+            fg = COLORS["green"] if entry.state == es.BUY else COLORS["red"]
+        else:
+            text = _STATE_SHORT.get(state, "—")
+            fg = _STATE_COLOR.get(state, COLORS["subtext"])
         item = QTableWidgetItem(text)
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        item.setForeground(QColor(_STATE_COLOR.get(state, COLORS["subtext"])))
+        item.setForeground(QColor(fg))
         if signal:
             item.setBackground(QColor(30, 80, 60) if entry.state == es.BUY
                                else QColor(90, 45, 40))

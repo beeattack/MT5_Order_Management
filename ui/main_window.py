@@ -303,6 +303,7 @@ class MainWindow(QMainWindow):
         self._watchlist_panel.watch_toggled.connect(self._on_watch_toggle)
         self._watchlist_panel.mute_toggled.connect(self._on_watch_mute)
         self._watchlist_panel.test_sound_requested.connect(self._on_watch_test)
+        self._watchlist_panel.refresh_requested.connect(self._on_watch_refresh)
 
         self._tradeplan_panel = TradePlanPanel()
         self._tradeplan_panel.dd_pct_changed.connect(self._on_plan_pct_changed)
@@ -597,6 +598,23 @@ class MainWindow(QMainWindow):
 
     def _on_watch_mute(self, muted: bool) -> None:
         self.watchlist.set_muted(muted)
+
+    def _on_watch_refresh(self) -> None:
+        """Manual watchlist refresh — same scan the watch timer runs."""
+        count = self.watchlist.refresh_now()
+        if count < 0:
+            self._watchlist_panel.log_message(
+                "Refresh skipped - connect to MT5 first."
+            )
+        elif count == 0:
+            self._watchlist_panel.log_message(
+                "Refresh: no symbols in the watchlist yet."
+            )
+        else:
+            quiet = "" if self.watchlist.enabled else " (alerts off while not watching)"
+            self._watchlist_panel.log_message(
+                f"Refreshed {count} symbol{'s' if count != 1 else ''}{quiet}."
+            )
 
     def _on_watch_alert(self, symbol: str, timeframe: str, reading) -> None:
         self._watchlist_panel.log_alert(symbol, timeframe, reading)
