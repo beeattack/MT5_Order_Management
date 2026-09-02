@@ -6,9 +6,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QAbstractItemView, QDateTimeEdit, QDateEdit, QComboBox,
+    QStyledItemDelegate,
 )
 from PySide6.QtCore import Qt, QDate, QDateTime, QTime, Signal
-from PySide6.QtGui import QFont, QColor, QTextCharFormat
+from PySide6.QtGui import QFont, QColor, QTextCharFormat, QBrush, QPalette
 
 from models.history_entry import HistoryEntry
 from core.constants import source_icon, source_label
@@ -71,7 +72,13 @@ QTableWidget {{
     gridline-color: {COLORS['accent']};
     border: 1px solid {COLORS['accent']};
     font-size: 12px;
-    selection-background-color: {COLORS['accent']};
+    selection-background-color: {COLORS['btn_hover']};
+}}
+QTableWidget::item:selected {{
+    background-color: {COLORS['btn_hover']};
+}}
+QHeaderView::section:hover {{
+    background-color: {COLORS['btn_hover']};
 }}
 QTableWidget::item {{
     padding: 2px 6px;
@@ -208,6 +215,57 @@ _TIME_SLOTS: list[QTime] = (
 )
 
 
+# Sort keys live here so columns order by value, not by their formatted text
+# ("1,234.56", "+12.30", "2026-08-19 14:05" all sort wrongly as strings).
+_SORT_ROLE = Qt.ItemDataRole.UserRole
+_CELL_FLAGS = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+
+
+class _SortableItem(QTableWidgetItem):
+    """Cell that compares on its stored sort key, falling back to text."""
+
+    def __lt__(self, other):
+        mine = self.data(_SORT_ROLE)
+        theirs = other.data(_SORT_ROLE) if isinstance(other, QTableWidgetItem) else None
+        if mine is not None and theirs is not None:
+            try:
+                return mine < theirs
+            except TypeError:
+                pass
+        return super().__lt__(other)
+
+
+class _KeepColorDelegate(QStyledItemDelegate):
+    """Keep each cell's own text color on the selected row.
+
+    Qt paints selected text with the palette's HighlightedText, which would
+    flatten the green/red profit and BUY/SELL coloring exactly on the row the
+    user is looking at. Feeding the item's own color back in as
+    HighlightedText keeps it.
+    """
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        fg = index.data(Qt.ItemDataRole.ForegroundRole)
+        color = fg.color() if isinstance(fg, QBrush) else fg
+        if isinstance(color, QColor) and color.isValid():
+            option.palette.setColor(QPalette.ColorRole.HighlightedText, color)
+
+
+class _HistoryTable(QTableWidget):
+    """Table whose row selection toggles: clicking the highlighted row clears
+    it, so a click selects and a second click on the same row resets it."""
+
+    def mousePressEvent(self, event) -> None:
+        index = self.indexAt(event.position().toPoint())
+        if (event.button() == Qt.MouseButton.LeftButton and index.isValid()
+                and self.selectionModel().isRowSelected(index.row())):
+            self.clearSelection()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class HistoryPanel(QWidget):
     filter_requested = Signal(object, object)   # (from_datetime, to_datetime)
 
@@ -298,10 +356,12 @@ class HistoryPanel(QWidget):
         layout.addLayout(filter_row)
 
         # --- Table ---
-        self._table = QTableWidget(0, len(_COLUMNS))
+        self._table = _HistoryTable(0, len(_COLUMNS))
         self._table.setHorizontalHeaderLabels(_COLUMNS)
         self._table.setAlternatingRowColors(True)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._table.setItemDelegate(_KeepColorDelegate(self._table))
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
         self._table.verticalHeader().setDefaultSectionSize(28)
@@ -322,6 +382,13 @@ class HistoryPanel(QWidget):
             else:
                 hh.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Fixed)
                 self._table.setColumnWidth(col_idx, col_widths[name])
+
+        # Header-click sorting; clicking the same header again flips the
+        # direction. Seeded to Close Time descending, which is the order
+        # HistoryManager already returns, so the first view is unchanged.
+        hh.setSortIndicator(_COL["Close Time"], Qt.SortOrder.DescendingOrder)
+        hh.setSortIndicatorShown(True)
+        self._table.setSortingEnabled(True)
 
         layout.addWidget(self._table)
 
@@ -434,37 +501,51 @@ class HistoryPanel(QWidget):
         self._table.setRowCount(0)
         self._table.setRowCount(len(entries))
 
-        for row, entry in enumerate(entries):
-            self._set_item(row, _COL["Ticket"], str(entry.ticket))
+        # Sorting must be off while filling: with it on, each inserted row is
+        # re-sorted immediately and the next setItem lands on the wrong row.
+        self._table.setSortingEnabled(False)
 
-            sym_item = QTableWidgetItem(f"{source_icon(entry.is_auto)}  {entry.symbol}")
-            sym_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        for row, entry in enumerate(entries):
+            self._set_item(row, _COL["Ticket"], str(entry.ticket), sort_key=entry.ticket)
+
+            sym_item = _SortableItem(f"{source_icon(entry.is_auto)}  {entry.symbol}")
+            sym_item.setFlags(_CELL_FLAGS)
+            sym_item.setData(_SORT_ROLE, entry.symbol)   # sort on the name, not the icon
             sym_item.setToolTip(source_label(entry.is_auto))
             self._table.setItem(row, _COL["Symbol"], sym_item)
 
-            type_item = QTableWidgetItem(entry.order_type)
-            type_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            type_item = _SortableItem(entry.order_type)
+            type_item.setFlags(_CELL_FLAGS)
+            type_item.setData(_SORT_ROLE, entry.order_type)
             type_color = QColor(COLORS["green"]) if entry.order_type == "BUY" else QColor(COLORS["red"])
             type_item.setForeground(type_color)
             self._table.setItem(row, _COL["Type"], type_item)
 
             self._set_exit_item(row, entry.close_reason)
 
-            self._set_item(row, _COL["Volume"], f"{entry.volume:.2f}", align_right=True)
-            self._set_item(row, _COL["Open Price"], f"{entry.open_price:,.{entry.digits}f}", align_right=True)
-            self._set_item(row, _COL["Close Price"], f"{entry.close_price:,.{entry.digits}f}", align_right=True)
+            self._set_item(row, _COL["Volume"], f"{entry.volume:.2f}",
+                           align_right=True, sort_key=entry.volume)
+            self._set_item(row, _COL["Open Price"], f"{entry.open_price:,.{entry.digits}f}",
+                           align_right=True, sort_key=entry.open_price)
+            self._set_item(row, _COL["Close Price"], f"{entry.close_price:,.{entry.digits}f}",
+                           align_right=True, sort_key=entry.close_price)
 
             profit_sign  = "+" if entry.profit >= 0 else ""
-            profit_item  = QTableWidgetItem(f"{profit_sign}{entry.profit:,.2f}")
-            profit_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            profit_item  = _SortableItem(f"{profit_sign}{entry.profit:,.2f}")
+            profit_item.setFlags(_CELL_FLAGS)
+            profit_item.setData(_SORT_ROLE, entry.profit)
             profit_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             profit_color = QColor(COLORS["green"]) if entry.profit >= 0 else QColor(COLORS["red"])
             profit_item.setForeground(profit_color)
             self._table.setItem(row, _COL["Profit"], profit_item)
 
-            self._set_item(row, _COL["Open Time"], format_dt(entry.open_time,  self._tz_name))
-            self._set_item(row, _COL["Close Time"], format_dt(entry.close_time, self._tz_name))
+            self._set_item(row, _COL["Open Time"], format_dt(entry.open_time, self._tz_name),
+                           sort_key=entry.open_time.timestamp())
+            self._set_item(row, _COL["Close Time"], format_dt(entry.close_time, self._tz_name),
+                           sort_key=entry.close_time.timestamp())
 
+        # Re-applies whichever column/direction the user last clicked
+        self._table.setSortingEnabled(True)
         self._table.resizeColumnToContents(_COL["Ticket"])
 
         # Summary bar
@@ -486,17 +567,20 @@ class HistoryPanel(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _set_item(self, row: int, col: int, text: str, align_right: bool = False) -> None:
-        item = QTableWidgetItem(text)
-        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+    def _set_item(self, row: int, col: int, text: str, align_right: bool = False,
+                  sort_key=None) -> None:
+        item = _SortableItem(text)
+        item.setFlags(_CELL_FLAGS)
+        item.setData(_SORT_ROLE, text if sort_key is None else sort_key)
         if align_right:
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._table.setItem(row, col, item)
 
     def _set_exit_item(self, row: int, reason: str) -> None:
         label, color, tip = _EXIT_DISPLAY.get(reason or "OTHER", _EXIT_DISPLAY["OTHER"])
-        item = QTableWidgetItem(label)
-        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item = _SortableItem(label)
+        item.setFlags(_CELL_FLAGS)
+        item.setData(_SORT_ROLE, reason or "OTHER")
         item.setForeground(QColor(color))
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         font = QFont("Consolas", 11)
