@@ -23,6 +23,7 @@ from ui.ghost_panel      import GhostPanel
 
 from core.auto_trader import AutoTrader
 from core.watchlist import WatchlistMonitor, market_watch_symbols
+from core import fx_rate
 from core.settings_store import SettingsStore
 from core import trade_plan
 from core import analytics
@@ -291,6 +292,7 @@ class MainWindow(QMainWindow):
 
         self._dashboard_panel = DashboardPanel()
         self._dashboard_panel.period_changed.connect(self._on_dashboard_period)
+        self._dashboard_panel.thb_rate_changed.connect(self._on_thb_rate_changed)
 
         self._autotrade_panel = AutoTradePanel()
         self._autotrade_panel.start_requested.connect(self._on_autotrade_start)
@@ -342,6 +344,9 @@ class MainWindow(QMainWindow):
 
         self._autotrade_panel.load_config(self.settings.get("autotrade") or {})
         self._ghost_panel.set_opacity_pct(int(self._ghost_opacity * 100))
+        self._dashboard_panel.set_manual_thb_rate(
+            float(self.settings.get("thb_manual_rate", 0.0))
+        )
         self._tradeplan_panel.set_dd_pct(int(self.settings.get("tradeplan_dd_pct", 100)))
         self._tradeplan_panel.set_target_pct(int(self.settings.get("tradeplan_target_pct", 200)))
         self._tradeplan_panel.set_risk_tenths(int(self.settings.get("tradeplan_risk_tenths", 10)))
@@ -744,7 +749,23 @@ class MainWindow(QMainWindow):
             return
         entries = self.history_mgr.get_history(from_dt, to_dt)
         stats = analytics.compute(entries)
-        self._dashboard_panel.update_dashboard(stats, analytics.insights(stats))
+        account = self.connector.get_account_info() or {}
+        currency = account.get("currency", "")
+        live = fx_rate.broker_rate(currency)
+        self._dashboard_panel.set_live_thb_rate(*(live or (None, "")))
+        net_thb = fx_rate.to_thb(
+            stats.net_profit, currency,
+            manual_rate=self._dashboard_panel.manual_thb_rate(),
+        )
+        self._dashboard_panel.update_dashboard(
+            stats, analytics.insights(stats), net_thb
+        )
+
+    def _on_thb_rate_changed(self, rate: float) -> None:
+        """Persist the manual THB rate and redraw the card with it."""
+        self.settings.set("thb_manual_rate", float(rate))
+        if self._connected:
+            self._on_dashboard_period(*self._dashboard_panel.current_range())
 
     # ------------------------------------------------------------------
     # Timer callbacks

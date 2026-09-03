@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QFrame, QScrollArea, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QSizePolicy,
+    QHeaderView, QAbstractItemView, QSizePolicy, QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QBrush, QPainterPath
@@ -214,6 +214,7 @@ class DonutChartWidget(QWidget):
 
 class DashboardPanel(QWidget):
     period_changed = Signal(object, object)   # (from_dt, to_dt) UTC-aware
+    thb_rate_changed = Signal(float)          # manual THB rate edited
 
     _PERIODS = ["Today", "1W", "1M", "3M", "YTD", "All"]
 
@@ -224,6 +225,7 @@ class DashboardPanel(QWidget):
         self.setStyleSheet(_PANEL_QSS)
         self._cards: dict[str, QLabel] = {}
         self._targets: dict[str, QLabel] = {}
+        self._subs: dict[str, QLabel] = {}
         self._period = "1M"
         self._balance = 0.0
         self._build_ui()
@@ -248,6 +250,24 @@ class DashboardPanel(QWidget):
         )
         top.addWidget(self._snapshot)
         top.addStretch()
+
+        # Manual THB rate — the fallback when the broker quotes no THB pair.
+        # Shown greyed with the live rate when one is available, so it's clear
+        # which of the two produced the baht figure on the Net P/L card.
+        self._thb_lbl = QLabel("฿/unit:")
+        self._thb_lbl.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 11px;")
+        top.addWidget(self._thb_lbl)
+
+        self._thb_spin = QDoubleSpinBox()
+        self._thb_spin.setObjectName("thbRate")
+        self._thb_spin.setRange(0.0, 10000.0)
+        self._thb_spin.setDecimals(4)
+        self._thb_spin.setSingleStep(0.25)
+        self._thb_spin.setSpecialValueText("—")     # 0 = unset
+        self._thb_spin.setFixedWidth(96)
+        self._thb_spin.setKeyboardTracking(False)
+        self._thb_spin.valueChanged.connect(self.thb_rate_changed)
+        top.addWidget(self._thb_spin)
 
         period_lbl = QLabel("Period:")
         period_lbl.setStyleSheet(f"color: {COLORS['subtext']}; font-size: 11px;")
@@ -280,7 +300,7 @@ class DashboardPanel(QWidget):
         self._donut = DonutChartWidget()
         hero.addWidget(self._donut, 0)
         for key in ("Net P/L", "Profit Factor", "Expectancy"):
-            hero.addWidget(self._make_card(key, hero=True), 1)
+            hero.addWidget(self._make_card(key, hero=True, sub=(key == "Net P/L")), 1)
         col.addLayout(hero)
 
         # secondary stat cards
@@ -326,7 +346,7 @@ class DashboardPanel(QWidget):
         lbl.setObjectName("sectionTitle")
         return lbl
 
-    def _make_card(self, key: str, hero: bool = False) -> QFrame:
+    def _make_card(self, key: str, hero: bool = False, sub: bool = False) -> QFrame:
         card = QFrame()
         card.setObjectName("card")
         card.setMinimumHeight(100 if hero else 64)
@@ -347,6 +367,15 @@ class DashboardPanel(QWidget):
         if hero:
             lay.addStretch()
         lay.addWidget(v)
+        if sub:
+            # secondary reading of the same number (Net P/L in baht)
+            sub_lbl = QLabel("")
+            sub_lbl.setStyleSheet(
+                f"color: {COLORS['subtext']}; font-size: 14px; font-weight: bold; "
+                f"font-family: Consolas, monospace; background: transparent;"
+            )
+            lay.addWidget(sub_lbl)
+            self._subs[key] = sub_lbl
         lay.addWidget(target)
         self._cards[key] = v
         self._targets[key] = target
@@ -419,15 +448,20 @@ class DashboardPanel(QWidget):
             )
         for t_lbl in self._targets.values():
             t_lbl.setText("")
+        for s_lbl in self._subs.values():
+            s_lbl.setText("")
+            s_lbl.setToolTip("")
         self._donut.set_data(0, 0, 0.0)
         self._equity.set_curve([])
         for t in (self._tbl_symbol, self._tbl_direction, self._tbl_source):
             t.setRowCount(0)
         self._clear_insights()
 
-    def update_dashboard(self, stats: PerformanceStats, insights: list[Insight]) -> None:
+    def update_dashboard(self, stats: PerformanceStats, insights: list[Insight],
+                         net_thb: tuple[float, str] | None = None) -> None:
         self._donut.set_data(stats.wins, stats.losses, stats.breakeven_win_rate)
         self._set_money_card("Net P/L", stats.net_profit)
+        self._set_thb("Net P/L", stats.net_profit, net_thb)
         self._set_card("Profit Factor", analytics._fmt_pf(stats.profit_factor))
         self._set_money_card("Expectancy", stats.expectancy, suffix=" /trade")
         self._set_card("Trades", f"{stats.total_trades}  ({stats.wins}W/{stats.losses}L)")
@@ -498,6 +532,60 @@ class DashboardPanel(QWidget):
         self._set_target("Largest Loss", "≤ 3× avg loss", ll)
         self._set_target("Max Loss Streak", "≤ 4 ideal", st(lo(stats.max_consec_losses, 4, 6)))
         self._set_target("Avg Hold", "—", "neutral")
+
+    def set_manual_thb_rate(self, rate: float) -> None:
+        """Load the persisted manual rate without re-emitting the change."""
+        self._thb_spin.blockSignals(True)
+        self._thb_spin.setValue(float(rate or 0.0))
+        self._thb_spin.blockSignals(False)
+
+    def manual_thb_rate(self) -> float:
+        return float(self._thb_spin.value())
+
+    def set_live_thb_rate(self, rate: float | None, note: str = "") -> None:
+        """Reflect whether the broker is supplying the rate. When it is, the
+        manual field is disabled and shows the live number — it stays visible
+        so the source of the baht figure is never ambiguous."""
+        live = rate is not None and rate > 0
+        self._thb_spin.setDisabled(live)
+        if live:
+            self._thb_spin.blockSignals(True)
+            self._thb_spin.setValue(float(rate))
+            self._thb_spin.blockSignals(False)
+            self._thb_spin.setToolTip(f"Live broker rate — {note}")
+            self._thb_lbl.setToolTip(f"Live broker rate — {note}")
+        else:
+            tip = ("Broker quotes no THB pair - type the rate to use "
+                   "(THB per unit of the account currency).")
+            self._thb_spin.setToolTip(tip)
+            self._thb_lbl.setToolTip(tip)
+
+    def _set_thb(self, key: str, value: float, converted: tuple[float, str] | None) -> None:
+        """Second line under the amount: the same figure in Thai baht.
+
+        Colored like the amount above it so the two read as one number, and
+        the tooltip names the broker pair and rate the conversion used."""
+        lbl = self._subs.get(key)
+        if lbl is None:
+            return
+        if converted is None:
+            lbl.setText("฿ —")
+            lbl.setToolTip("No THB rate available - the broker lists no route "
+                           "from the account currency to THB.")
+            lbl.setStyleSheet(
+                f"color: {COLORS['subtext']}; font-size: 14px; font-weight: bold; "
+                f"font-family: Consolas, monospace; background: transparent;"
+            )
+            return
+        baht, note = converted
+        sign = "+" if baht >= 0 else ""
+        color = COLORS["green"] if value >= 0 else COLORS["red"]
+        lbl.setText(f"≈ {sign}฿{baht:,.2f}")
+        lbl.setToolTip(f"Net P/L in Thai baht - converted at {note}")
+        lbl.setStyleSheet(
+            f"color: {color}; font-size: 14px; font-weight: bold; "
+            f"font-family: Consolas, monospace; background: transparent;"
+        )
 
     def _set_daily_growth(self, net_profit: float) -> None:
         """On the Today view, show today's profit as a % of the start-of-day
