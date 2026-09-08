@@ -23,8 +23,6 @@ COLORS = {
     "btn_hover": "#1a4a8a",
 }
 
-_ROW_FLAGS = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-
 # Transparency slider range (window opacity %)
 MIN_OPACITY_PCT = 30
 DEFAULT_OPACITY_PCT = 92
@@ -95,8 +93,6 @@ QComboBox#ghostSymbol QAbstractItemView {{
     border: 1px solid {COLORS['accent']};
     selection-background-color: {COLORS['accent']};
 }}
-QTableWidget {{ selection-background-color: {COLORS['btn_hover']}; outline: none; }}
-QTableWidget::item:selected {{ background-color: {COLORS['btn_hover']}; }}
 QSlider::groove:horizontal {{ height: 4px; background: {COLORS['accent']}; border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {COLORS['btn_hover']}; border-radius: 2px; }}
 QSlider::handle:horizontal {{
@@ -302,11 +298,11 @@ class GhostPanel(QWidget):
         self._table.setShowGrid(False)
         self._table.verticalHeader().setDefaultSectionSize(26)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self._table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        # clicking an order charts its symbol (the close button is a cell
-        # widget, so hitting ✕ never reaches this)
+        # A click still reports its cell with NoSelection, so the row can chart
+        # its symbol without the row ever being highlighted. The close button is
+        # a cell widget, so hitting ✕ never reaches this.
         self._table.cellClicked.connect(self._on_order_clicked)
         self._table.setFont(QFont("Consolas", 11))
         hh = self._table.horizontalHeader()
@@ -363,13 +359,15 @@ class GhostPanel(QWidget):
         layout.addLayout(bottom)
 
     def _on_order_clicked(self, row: int, _col: int) -> None:
-        """Chart the clicked order's symbol, opening the chart if it's closed."""
+        """Chart the clicked order's symbol.
+
+        Never opens the chart area: if it is collapsed the symbol is still
+        selected (and persisted), so it is already showing when the user
+        opens it themselves.
+        """
         item = self._table.item(row, 0)
-        if item is None:
-            return
-        self.select_chart_symbol(item.text())
-        if not self._chart_btn.isChecked():
-            self._chart_btn.setChecked(True)   # emits chart_toggled -> window grows
+        if item is not None:
+            self.select_chart_symbol(item.text())
 
     def _on_chart_toggled(self, shown: bool) -> None:
         self._chart_btn.setText(("▾ " if shown else "▸ ") + "M15 Chart")
@@ -377,24 +375,8 @@ class GhostPanel(QWidget):
         self.chart_toggled.emit(shown)
 
     def _on_symbol_changed(self, symbol: str) -> None:
-        self._sync_chart_row()
         if symbol:
             self.chart_symbol_changed.emit(symbol)
-
-    def _sync_chart_row(self) -> None:
-        """Highlight the order whose symbol is charted, if one is open.
-
-        The highlight marks *what is charted*, not what was last touched:
-        clicking ✕ would otherwise move it to a row whose symbol isn't on the
-        chart, and a rebuild after an order closes would drop it entirely.
-        """
-        symbol = self.chart_symbol()
-        for row in range(self._table.rowCount()):
-            item = self._table.item(row, 0)
-            if item is not None and item.text() == symbol:
-                self._table.selectRow(row)
-                return
-        self._table.clearSelection()
 
     # ------------------------------------------------------------------
     # Chart API
@@ -466,7 +448,6 @@ class GhostPanel(QWidget):
             # intact so a click isn't interrupted by the 100ms rebuild
             for row, order in enumerate(orders):
                 self._set_pl(row, order.profit)
-            self._sync_chart_row()
             return
 
         self._tickets = new_tickets
@@ -474,17 +455,17 @@ class GhostPanel(QWidget):
         self._table.setRowCount(len(orders))
         for row, order in enumerate(orders):
             sym = QTableWidgetItem(order.symbol)
-            sym.setFlags(_ROW_FLAGS)
+            sym.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self._table.setItem(row, 0, sym)
 
             typ = QTableWidgetItem(order.order_type)
-            typ.setFlags(_ROW_FLAGS)
+            typ.setFlags(Qt.ItemFlag.ItemIsEnabled)
             typ.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             typ.setForeground(QColor(COLORS["green"] if order.order_type == "BUY" else COLORS["red"]))
             self._table.setItem(row, 1, typ)
 
             vol = QTableWidgetItem(f"{order.volume:.2f}")
-            vol.setFlags(_ROW_FLAGS)
+            vol.setFlags(Qt.ItemFlag.ItemIsEnabled)
             vol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self._table.setItem(row, 2, vol)
 
@@ -499,18 +480,13 @@ class GhostPanel(QWidget):
                 f"QPushButton {{ background-color: {COLORS['red']}; border-radius: 3px; }}"
                 f"QPushButton:hover {{ background-color: #c0392b; }}"
             )
-            # pressing the button also moves the view's selection to its row;
-            # put the highlight back on the charted symbol afterwards
-            btn.clicked.connect(lambda _=False, t=order.ticket: (
-                self.close_order_requested.emit(t), self._sync_chart_row()))
+            btn.clicked.connect(lambda _=False, t=order.ticket: self.close_order_requested.emit(t))
             self._table.setCellWidget(row, 4, btn)
-
-        self._sync_chart_row()
 
     def _set_pl(self, row: int, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
         item = QTableWidgetItem(f"{sign}{profit:,.2f}")
-        item.setFlags(_ROW_FLAGS)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         item.setForeground(QColor(COLORS["green"] if profit >= 0 else COLORS["red"]))
         self._table.setItem(row, 3, item)
