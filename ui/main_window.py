@@ -332,6 +332,8 @@ class MainWindow(QMainWindow):
         self._ghost_panel.switch_compact.connect(lambda: self._apply_mode("compact"))
         self._ghost_panel.close_order_requested.connect(lambda t: self._on_close_order(t, 100.0))
         self._ghost_panel.opacity_changed.connect(self._on_ghost_opacity)
+        self._ghost_panel.chart_toggled.connect(self._on_ghost_chart_toggled)
+        self._ghost_panel.chart_symbol_changed.connect(self._on_ghost_chart_symbol)
         self._ghost_panel.setVisible(False)
         layout.addWidget(self._ghost_panel)
 
@@ -344,6 +346,9 @@ class MainWindow(QMainWindow):
 
         self._autotrade_panel.load_config(self.settings.get("autotrade") or {})
         self._ghost_panel.set_opacity_pct(int(self._ghost_opacity * 100))
+        self._ghost_panel.set_chart_visible(
+            bool(self.settings.get("ghost_chart_open", False))
+        )
         self._dashboard_panel.set_manual_thb_rate(
             float(self.settings.get("thb_manual_rate", 0.0))
         )
@@ -429,6 +434,12 @@ class MainWindow(QMainWindow):
         self._autotrade_timer.timeout.connect(self.auto_trader.on_tick)
 
         # Watchlist trend-scan loop
+        # M15 bars for the ghost chart move slowly; 5s is ample and keeps the
+        # fetch off the 100ms order-refresh path.
+        self._ghost_chart_timer = QTimer(self)
+        self._ghost_chart_timer.setInterval(5000)
+        self._ghost_chart_timer.timeout.connect(self._refresh_ghost_chart)
+
         self._watchlist_timer = QTimer(self)
         self._watchlist_timer.setInterval(10000)
         self._watchlist_timer.timeout.connect(self.watchlist.on_tick)
@@ -482,6 +493,7 @@ class MainWindow(QMainWindow):
         self._orders_panel.update_orders([])
         self._ghost_panel.update_orders([])
         self._ghost_panel.update_account(0.0, 0.0, 0.0)
+        self._ghost_panel.set_chart_bars(None)
         self._history_panel.clear()
         self._dashboard_panel.clear()
         self._detection_timer.start()
@@ -665,6 +677,7 @@ class MainWindow(QMainWindow):
     def _refresh_watch_symbols(self) -> None:
         if self._connected and self.connector.is_connected():
             self._watchlist_panel.set_symbol_choices(market_watch_symbols())
+            self._refresh_ghost_symbols()
 
     def _refresh_autotrade_symbols(self) -> None:
         if self._connected and self.connector.is_connected():
@@ -811,6 +824,38 @@ class MainWindow(QMainWindow):
         # Connection-panel button toggles between Normal and Compact
         self._apply_mode("compact" if self._mode == "normal" else "normal")
 
+    def _on_ghost_chart_toggled(self, shown: bool) -> None:
+        """Grow / shrink the overlay by the chart area and drive its refresh."""
+        self.settings.set("ghost_chart_open", bool(shown))
+        if self._mode == "ghost":
+            delta = self._ghost_panel.CHART_AREA_HEIGHT + 5   # + layout spacing
+            self.resize(self.width(), max(150, self.height() + (delta if shown else -delta)))
+        if shown:
+            self._refresh_ghost_symbols()
+            self._refresh_ghost_chart()
+            if self._mode == "ghost":
+                self._ghost_chart_timer.start()
+        else:
+            self._ghost_chart_timer.stop()
+
+    def _on_ghost_chart_symbol(self, symbol: str) -> None:
+        self.settings.set("ghost_chart_symbol", symbol)
+        self._refresh_ghost_chart()
+
+    def _refresh_ghost_symbols(self) -> None:
+        if self._connected and self.connector.is_connected():
+            self._ghost_panel.set_symbol_choices(market_watch_symbols())
+
+    def _refresh_ghost_chart(self) -> None:
+        if not self._ghost_panel.chart_visible():
+            return
+        symbol = self._ghost_panel.chart_symbol()
+        if not self._connected or not symbol:
+            self._ghost_panel.set_chart_bars(None)
+            return
+        bars = self.connector.copy_rates(symbol, "M15", 60)
+        self._ghost_panel.set_chart_bars(bars, self.connector.symbol_digits(symbol))
+
     def _on_ghost_opacity(self, opacity: float) -> None:
         self._ghost_opacity = opacity
         self.settings.set("ghost_opacity_pct", round(opacity * 100))
@@ -822,6 +867,7 @@ class MainWindow(QMainWindow):
         # ghost mode restores it instead of snapping back to the default.
         if self._mode == "ghost" and mode != "ghost":
             self._remember_ghost_height()
+            self._ghost_chart_timer.stop()
 
         self._mode = mode
         compact = mode == "compact"
@@ -881,6 +927,13 @@ class MainWindow(QMainWindow):
             self.setMaximumHeight(16777215)
             self.resize(ghost_w, self._ghost_height)
             self._refresh_orders()   # populate immediately
+            self._refresh_ghost_symbols()
+            saved_symbol = self.settings.get("ghost_chart_symbol")
+            if saved_symbol:
+                self._ghost_panel.select_chart_symbol(str(saved_symbol))
+            if self._ghost_panel.chart_visible():
+                self._refresh_ghost_chart()
+                self._ghost_chart_timer.start()
 
     def _remember_ghost_height(self) -> None:
         self._ghost_height = max(150, self.height())

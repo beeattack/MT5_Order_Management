@@ -70,6 +70,33 @@ class MT5Connector:
             return False
         return mt5.terminal_info() is not None
 
+    def copy_rates(self, symbol: str, tf_name: str, count: int):
+        """Recent bars for *symbol* on the named timeframe ("M15", "H1", ...).
+
+        Returns the raw MT5 structured array (time/open/high/low/close/...) or
+        None. Like every other MT5 call here it runs on the main thread.
+        """
+        if not MT5_AVAILABLE or not self.is_connected() or not symbol:
+            return None
+        tf = getattr(mt5, f"TIMEFRAME_{tf_name}", None)
+        if tf is None:
+            return None
+        try:
+            mt5.symbol_select(symbol, True)
+            return mt5.copy_rates_from_pos(symbol, tf, 0, count)
+        except Exception:
+            return None
+
+    def symbol_digits(self, symbol: str, default: int = 5) -> int:
+        """Price decimals for *symbol* — 5 for most FX, 3 for JPY, 2 for metals."""
+        if not MT5_AVAILABLE or not self.is_connected() or not symbol:
+            return default
+        try:
+            info = mt5.symbol_info(symbol)
+        except Exception:
+            info = None
+        return int(getattr(info, "digits", default)) if info else default
+
     def get_account_info(self) -> dict | None:
         if not MT5_AVAILABLE or not self.is_connected():
             return None
