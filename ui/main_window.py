@@ -334,6 +334,7 @@ class MainWindow(QMainWindow):
         self._ghost_panel.opacity_changed.connect(self._on_ghost_opacity)
         self._ghost_panel.chart_toggled.connect(self._on_ghost_chart_toggled)
         self._ghost_panel.chart_symbol_changed.connect(self._on_ghost_chart_symbol)
+        self._ghost_panel.chart_timeframe_changed.connect(self._on_ghost_chart_tf)
         self._ghost_panel.setVisible(False)
         layout.addWidget(self._ghost_panel)
 
@@ -348,6 +349,9 @@ class MainWindow(QMainWindow):
         self._ghost_panel.set_opacity_pct(int(self._ghost_opacity * 100))
         self._ghost_panel.set_chart_visible(
             bool(self.settings.get("ghost_chart_open", False))
+        )
+        self._ghost_panel.set_chart_timeframe(
+            str(self.settings.get("ghost_chart_tf", GhostPanel.DEFAULT_TIMEFRAME))
         )
         self._dashboard_panel.set_manual_thb_rate(
             float(self.settings.get("thb_manual_rate", 0.0))
@@ -842,6 +846,10 @@ class MainWindow(QMainWindow):
         self.settings.set("ghost_chart_symbol", symbol)
         self._refresh_ghost_chart()
 
+    def _on_ghost_chart_tf(self, tf: str) -> None:
+        self.settings.set("ghost_chart_tf", tf)
+        self._refresh_ghost_chart()
+
     def _refresh_ghost_symbols(self) -> None:
         if self._connected and self.connector.is_connected():
             self._ghost_panel.set_symbol_choices(market_watch_symbols())
@@ -853,7 +861,7 @@ class MainWindow(QMainWindow):
         if not self._connected or not symbol:
             self._ghost_panel.set_chart_bars(None)
             return
-        bars = self.connector.copy_rates(symbol, "M15", 60)
+        bars = self.connector.copy_rates(symbol, self._ghost_panel.chart_timeframe(), 60)
         self._ghost_panel.set_chart_bars(bars, self.connector.symbol_digits(symbol))
 
     def _on_ghost_opacity(self, opacity: float) -> None:

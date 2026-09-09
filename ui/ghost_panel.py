@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSizeGrip,
     QComboBox,
@@ -79,6 +80,16 @@ QPushButton#modeBtn {{
 }}
 QPushButton#modeBtn:hover {{ background-color: {COLORS['btn_hover']}; }}
 QPushButton#modeBtn:checked {{ background-color: {COLORS['btn_hover']}; }}
+QPushButton#tfBtn {{
+    background-color: {COLORS['panel']}; color: {COLORS['subtext']};
+    border: 1px solid {COLORS['accent']}; border-radius: 3px;
+    font-size: 9px; font-weight: bold; padding: 0px;
+}}
+QPushButton#tfBtn:hover {{ background-color: {COLORS['accent']}; color: {COLORS['text']}; }}
+QPushButton#tfBtn:checked {{
+    background-color: {COLORS['btn_hover']}; color: {COLORS['text']};
+    border: 1px solid {COLORS['btn_hover']};
+}}
 QComboBox#ghostSymbol {{
     background-color: {COLORS['panel']}; color: {COLORS['text']};
     border: 1px solid {COLORS['accent']}; border-radius: 3px;
@@ -206,8 +217,12 @@ class GhostPanel(QWidget):
     close_order_requested = Signal(object)   # ticket (closes 100%); object avoids
     #                                          Qt's 32-bit int limit for large MT5 tickets
     opacity_changed      = Signal(float)  # window opacity 0.30–1.00
-    chart_toggled        = Signal(bool)   # expandable M15 chart shown/hidden
+    chart_toggled        = Signal(bool)   # expandable chart shown/hidden
     chart_symbol_changed = Signal(str)
+    chart_timeframe_changed = Signal(str)
+
+    CHART_TIMEFRAMES = ("M1", "M5", "M15", "H1", "H4")
+    DEFAULT_TIMEFRAME = "M15"
 
     CONTENT_WIDTH = 300
     # Height the overlay grows by when the chart area opens
@@ -322,14 +337,30 @@ class GhostPanel(QWidget):
         area.setContentsMargins(0, 0, 0, 0)
         area.setSpacing(3)
 
-        # symbol picker sits top-right of the area
+        # timeframe buttons on the left, symbol picker top-right
         pick = QHBoxLayout()
         pick.setContentsMargins(0, 0, 0, 0)
-        pick.setSpacing(4)
+        pick.setSpacing(3)
+
+        self._tf_group = QButtonGroup(self)
+        self._tf_group.setExclusive(True)
+        self._tf_btns: dict[str, QPushButton] = {}
+        for tf in self.CHART_TIMEFRAMES:
+            b = QPushButton(tf)
+            b.setObjectName("tfBtn")
+            b.setCheckable(True)
+            b.setFixedSize(28, 18)
+            b.setChecked(tf == self.DEFAULT_TIMEFRAME)
+            b.setToolTip(f"Show {tf} candles")
+            b.clicked.connect(lambda _=False, t=tf: self._on_timeframe_clicked(t))
+            self._tf_group.addButton(b)
+            self._tf_btns[tf] = b
+            pick.addWidget(b)
+
         pick.addStretch()
         self._symbol_combo = QComboBox()
         self._symbol_combo.setObjectName("ghostSymbol")
-        self._symbol_combo.setFixedWidth(130)
+        self._symbol_combo.setFixedWidth(112)
         self._symbol_combo.setToolTip("Symbols in the MT5 Market Watch")
         self._symbol_combo.currentTextChanged.connect(self._on_symbol_changed)
         pick.addWidget(self._symbol_combo)
@@ -351,7 +382,7 @@ class GhostPanel(QWidget):
         self._chart_btn.setObjectName("modeBtn")
         self._chart_btn.setCheckable(True)
         self._chart_btn.setFixedHeight(20)
-        self._chart_btn.setToolTip("Show the M15 chart for a symbol")
+        self._chart_btn.setToolTip("Show the chart for a symbol")
         self._chart_btn.toggled.connect(self._on_chart_toggled)
         bottom.addWidget(self._chart_btn)
         bottom.addStretch()
@@ -369,8 +400,17 @@ class GhostPanel(QWidget):
         if item is not None:
             self.select_chart_symbol(item.text())
 
+    def _on_timeframe_clicked(self, tf: str) -> None:
+        self._tf_btns[tf].setChecked(True)
+        self._update_chart_btn_text()
+        self.chart_timeframe_changed.emit(tf)
+
+    def _update_chart_btn_text(self) -> None:
+        arrow = "▾ " if self._chart_btn.isChecked() else "▸ "
+        self._chart_btn.setText(f"{arrow}{self.chart_timeframe()} Chart")
+
     def _on_chart_toggled(self, shown: bool) -> None:
-        self._chart_btn.setText(("▾ " if shown else "▸ ") + "M15 Chart")
+        self._update_chart_btn_text()
         self._chart_area.setVisible(shown)
         self.chart_toggled.emit(shown)
 
@@ -392,6 +432,19 @@ class GhostPanel(QWidget):
         self._chart_btn.blockSignals(False)
         self._chart_btn.setText(("▾ " if shown else "▸ ") + "M15 Chart")
         self._chart_area.setVisible(shown)
+
+    def chart_timeframe(self) -> str:
+        for tf, btn in self._tf_btns.items():
+            if btn.isChecked():
+                return tf
+        return self.DEFAULT_TIMEFRAME
+
+    def set_chart_timeframe(self, tf: str) -> None:
+        """Restore the saved timeframe without re-emitting the change."""
+        btn = self._tf_btns.get(tf)
+        if btn is not None:
+            btn.setChecked(True)
+            self._update_chart_btn_text()
 
     def chart_symbol(self) -> str:
         return self._symbol_combo.currentText().strip()
