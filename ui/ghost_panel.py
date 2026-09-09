@@ -6,9 +6,12 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSizeGrip,
     QComboBox,
 )
-from PySide6.QtCore import Qt, Signal, QSize, QRectF
-from PySide6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen
+from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPointF
+from PySide6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen, QPolygonF
 
+import numpy as np
+
+from core import indicators
 from models.order import Order
 
 COLORS = {
@@ -22,6 +25,8 @@ COLORS = {
     "subtext":   "#a0a0b0",
     "btn":       "#0f3460",
     "btn_hover": "#1a4a8a",
+    "ema_fast":  "#ffe98a",   # EMA 9 — light yellow, dashed
+    "ema_slow":  "#ff8c42",   # EMA 14 — orange, solid
 }
 
 # Transparency slider range (window opacity %)
@@ -123,21 +128,43 @@ class MiniChart(QWidget):
     """Compact candlestick chart for the ghost overlay.
 
     Paints whatever bars it is given — an MT5 rates array or any sequence of
-    (time, open, high, low, close) — scaled to the widget. Deliberately plain:
-    at ~290px wide there is room for candles and a last-price tag, nothing more.
+    (time, open, high, low, close) — scaled to the widget, with EMA 9 and
+    EMA 14 overlaid. Deliberately plain: at ~290px wide there is room for
+    candles, two averages and a last-price tag, nothing more.
+
+    Only the last MAX_BARS are drawn. Anything earlier is used to warm the
+    EMAs up, since `indicators.ema` seeds on the first value and its opening
+    readings would otherwise be visibly wrong at the left edge.
     """
+
+    MAX_BARS = 60
+    EMA_FAST = 9
+    EMA_SLOW = 14
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._bars = []
+        self._ema_fast: list[float] = []
+        self._ema_slow: list[float] = []
         self._symbol = ""
         self._digits = 5
         self.setMinimumHeight(120)
 
     def set_bars(self, bars, symbol: str = "", digits: int = 5) -> None:
-        self._bars = [] if bars is None else list(bars)
         self._symbol = symbol
         self._digits = digits
+        rows = [] if bars is None else list(bars)
+        if len(rows) < 2:
+            self._bars, self._ema_fast, self._ema_slow = rows, [], []
+            self.update()
+            return
+
+        closes = np.array([float(b["close"]) for b in rows], dtype=float)
+        fast = indicators.ema(closes, self.EMA_FAST)
+        slow = indicators.ema(closes, self.EMA_SLOW)
+        self._bars = rows[-self.MAX_BARS:]
+        self._ema_fast = [float(v) for v in fast[-self.MAX_BARS:]]
+        self._ema_slow = [float(v) for v in slow[-self.MAX_BARS:]]
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -183,6 +210,32 @@ class MiniChart(QWidget):
             top, bot = y(max(o, c)), y(min(o, c))
             rect = QRectF(cx - body_w / 2, top, body_w, max(1.0, bot - top))
             p.fillRect(rect, color)
+
+        # EMA overlays, drawn over the candles. Antialiasing goes on here only:
+        # the candles want crisp pixel edges, these want smooth diagonals.
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        def draw_ema(values: list[float], color: str, style: Qt.PenStyle) -> None:
+            pts = [QPointF(4 + step * (i + 0.5), y(v))
+                   for i, v in enumerate(values) if v == v]   # skip NaN
+            if len(pts) < 2:
+                return
+            p.setPen(QPen(QColor(color), 1.2, style))
+            p.drawPolyline(QPolygonF(pts))
+
+        draw_ema(self._ema_slow, COLORS["ema_slow"], Qt.PenStyle.SolidLine)
+        draw_ema(self._ema_fast, COLORS["ema_fast"], Qt.PenStyle.DashLine)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # legend, top-left — the two lines are otherwise easy to mix up
+        p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
+        if self._ema_fast:
+            p.setPen(QColor(COLORS["ema_fast"]))
+            p.drawText(QRectF(5, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
+                       f"EMA{self.EMA_FAST}")
+            p.setPen(QColor(COLORS["ema_slow"]))
+            p.drawText(QRectF(38, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
+                       f"EMA{self.EMA_SLOW}")
 
         # last price: dashed level plus a tag in the right margin
         last = float(self._bars[-1]["close"])
