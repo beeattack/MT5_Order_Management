@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 from PySide6.QtWidgets import (
@@ -221,6 +222,9 @@ class MainWindow(QMainWindow):
         self._ghost_opacity = ghost_opacity_pct / 100.0   # window opacity used in ghost mode
         # Last height the user resized the ghost overlay to; reused on re-entry.
         self._ghost_height = max(150, int(self.settings.get("ghost_height", 260)))
+        # (fetched_at, net) for the ghost overlay's "closed today" figure — the
+        # order refresh runs at 100ms and a history query per tick is waste
+        self._ghost_net_cache: tuple[float, float] | None = None
 
         self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         self.resize(840, 700)          # 30% narrower default than the old 1200
@@ -497,6 +501,8 @@ class MainWindow(QMainWindow):
         self._orders_panel.update_orders([])
         self._ghost_panel.update_orders([])
         self._ghost_panel.update_account(0.0, 0.0, 0.0)
+        self._ghost_panel.set_today_net(None)
+        self._ghost_net_cache = None
         self._ghost_panel.set_chart_bars(None)
         self._history_panel.clear()
         self._dashboard_panel.clear()
@@ -527,6 +533,7 @@ class MainWindow(QMainWindow):
             )
 
     def _on_close_order(self, ticket: int, percent: float) -> None:
+        self._ghost_net_cache = None   # a close changes today's realized total
         ok, err = self.order_mgr.close_percent(ticket, percent)
         if not ok:
             QMessageBox.warning(
@@ -809,6 +816,7 @@ class MainWindow(QMainWindow):
                 self._orders_panel.update_compact_stats(equity, profit)
             elif self._mode == "ghost":
                 self._ghost_panel.update_account(balance, equity, profit)
+                self._ghost_panel.set_today_net(self._today_realized_net())
 
     def _check_mt5_status(self) -> None:
         if self._connected:
@@ -863,6 +871,24 @@ class MainWindow(QMainWindow):
             return
         bars = self.connector.copy_rates(symbol, self._ghost_panel.chart_timeframe(), 120)
         self._ghost_panel.set_chart_bars(bars, self.connector.symbol_digits(symbol))
+
+    def _today_realized_net(self) -> float | None:
+        """Net profit of trades closed since midnight UTC, cached briefly.
+
+        Midnight UTC matches the Dashboard's "Today" period, so the two views
+        never disagree. HistoryEntry.profit is already net of commission, swap
+        and fee.
+        """
+        if not self._connected:
+            return None
+        now = time.monotonic()
+        if self._ghost_net_cache and now - self._ghost_net_cache[0] < 5.0:
+            return self._ghost_net_cache[1]
+        utc_now = datetime.now(timezone.utc)
+        start = utc_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        net = sum(e.profit for e in self.history_mgr.get_history(start, utc_now))
+        self._ghost_net_cache = (now, net)
+        return net
 
     def _on_ghost_opacity(self, opacity: float) -> None:
         self._ghost_opacity = opacity

@@ -326,15 +326,19 @@ class GhostPanel(QWidget):
 
         layout.addLayout(header)
 
-        # Balance / Equity line
+        # Balance / Equity / today's realized P/L line
         acct = QHBoxLayout()
         acct.setSpacing(12)
         self._bal_lbl = QLabel("Bal —")
         self._bal_lbl.setObjectName("ghostHint")
         self._eq_lbl = QLabel("Eq —")
         self._eq_lbl.setObjectName("ghostHint")
+        self._net_lbl = QLabel("Net —")
+        self._net_lbl.setObjectName("ghostHint")
+        self._net_lbl.setToolTip("Net P/L of trades closed today")
         acct.addWidget(self._bal_lbl)
         acct.addWidget(self._eq_lbl)
+        acct.addWidget(self._net_lbl)
         acct.addStretch()
         layout.addLayout(acct)
 
@@ -606,6 +610,23 @@ class GhostPanel(QWidget):
         )
         self._bal_lbl.setText(f"Bal ${balance:,.2f}")
         self._eq_lbl.setText(f"Eq ${equity:,.2f}")
+
+    def set_today_net(self, net: float | None) -> None:
+        """Realized P/L of today's closed trades, beside Balance and Equity.
+
+        Distinct from the header figure, which is the unrealized P/L of the
+        positions still open.
+        """
+        if net is None:
+            self._net_lbl.setText("Net —")
+            self._net_lbl.setStyleSheet("")
+            return
+        sign = "+" if net >= 0 else "-"
+        color = COLORS["green"] if net >= 0 else COLORS["red"]
+        self._net_lbl.setText(f"Net {sign}${abs(net):,.2f}")
+        self._net_lbl.setStyleSheet(
+            f"color: {color}; font-size: 10px; font-weight: bold;"
+        )
 
     # ------------------------------------------------------------------
     # Drag-to-move (frameless ghost window)
