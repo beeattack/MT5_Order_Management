@@ -869,7 +869,7 @@ class MainWindow(QMainWindow):
         if not self._connected or not symbol:
             self._ghost_panel.set_chart_bars(None)
             return
-        bars = self.connector.copy_rates(symbol, self._ghost_panel.chart_timeframe(), 120)
+        bars = self.connector.copy_rates(symbol, self._ghost_panel.chart_timeframe(), 150)
         self._ghost_panel.set_chart_bars(bars, self.connector.symbol_digits(symbol))
 
     def _today_realized_net(self) -> float | None:

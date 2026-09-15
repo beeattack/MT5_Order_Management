@@ -25,8 +25,10 @@ COLORS = {
     "subtext":   "#a0a0b0",
     "btn":       "#0f3460",
     "btn_hover": "#1a4a8a",
-    "ema_fast":  "#ffe98a",   # EMA 9 — light yellow, dashed
-    "ema_slow":  "#ff8c42",   # EMA 14 — orange, solid
+    "ema_9":     "#ffe98a",   # light yellow, dashed
+    "ema_14":    "#ff8c42",   # orange, solid
+    "ema_20":    "#7cc4ff",   # blue, solid — cool tone, so it reads apart
+    #                           from the warm pair and from the candles
 }
 
 # Transparency slider range (window opacity %)
@@ -138,14 +140,18 @@ class MiniChart(QWidget):
     """
 
     MAX_BARS = 60
-    EMA_FAST = 9
-    EMA_SLOW = 14
+    # (period, colour key, pen style) — drawn longest-period first so the
+    # fastest average ends up on top
+    EMA_SPECS = (
+        (9,  "ema_9",  Qt.PenStyle.DashLine),
+        (14, "ema_14", Qt.PenStyle.SolidLine),
+        (20, "ema_20", Qt.PenStyle.SolidLine),
+    )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._bars = []
-        self._ema_fast: list[float] = []
-        self._ema_slow: list[float] = []
+        self._emas: list[list[float]] = []
         self._symbol = ""
         self._digits = 5
         self.setMinimumHeight(120)
@@ -155,16 +161,16 @@ class MiniChart(QWidget):
         self._digits = digits
         rows = [] if bars is None else list(bars)
         if len(rows) < 2:
-            self._bars, self._ema_fast, self._ema_slow = rows, [], []
+            self._bars, self._emas = rows, []
             self.update()
             return
 
         closes = np.array([float(b["close"]) for b in rows], dtype=float)
-        fast = indicators.ema(closes, self.EMA_FAST)
-        slow = indicators.ema(closes, self.EMA_SLOW)
         self._bars = rows[-self.MAX_BARS:]
-        self._ema_fast = [float(v) for v in fast[-self.MAX_BARS:]]
-        self._ema_slow = [float(v) for v in slow[-self.MAX_BARS:]]
+        self._emas = [
+            [float(v) for v in indicators.ema(closes, period)[-self.MAX_BARS:]]
+            for period, _, _ in self.EMA_SPECS
+        ]
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -223,19 +229,20 @@ class MiniChart(QWidget):
             p.setPen(QPen(QColor(color), 1.2, style))
             p.drawPolyline(QPolygonF(pts))
 
-        draw_ema(self._ema_slow, COLORS["ema_slow"], Qt.PenStyle.SolidLine)
-        draw_ema(self._ema_fast, COLORS["ema_fast"], Qt.PenStyle.DashLine)
+        for values, (_, key, style) in reversed(list(zip(self._emas, self.EMA_SPECS))):
+            draw_ema(values, COLORS[key], style)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        # legend, top-left — the two lines are otherwise easy to mix up
+        # legend, top-left — the lines are otherwise easy to mix up
         p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
-        if self._ema_fast:
-            p.setPen(QColor(COLORS["ema_fast"]))
-            p.drawText(QRectF(5, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
-                       f"EMA{self.EMA_FAST}")
-            p.setPen(QColor(COLORS["ema_slow"]))
-            p.drawText(QRectF(38, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
-                       f"EMA{self.EMA_SLOW}")
+        lx = 5
+        for values, (period, key, _) in zip(self._emas, self.EMA_SPECS):
+            if not values:
+                continue
+            p.setPen(QColor(COLORS[key]))
+            p.drawText(QRectF(lx, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
+                       f"EMA{period}")
+            lx += 33 if period < 10 else 38
 
         # last price: dashed level plus a tag in the right margin
         last = float(self._bars[-1]["close"])
