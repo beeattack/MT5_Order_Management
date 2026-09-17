@@ -78,19 +78,19 @@ def _make_normal_icon(size: int = 14, color: str = "#eaeaea") -> QIcon:
 
 _PANEL_QSS = f"""
 QWidget#GhostPanel {{ background-color: {COLORS['bg']}; border: 1px solid {COLORS['accent']}; }}
-QLabel#ghostTotalKey {{ color: {COLORS['subtext']}; font-size: 10px; font-weight: bold; }}
-QLabel#ghostTotal    {{ font-size: 14px; font-weight: bold; font-family: Consolas, monospace; }}
-QLabel#ghostHint {{ color: {COLORS['subtext']}; font-size: 10px; }}
+QLabel#ghostTotalKey {{ color: {COLORS['subtext']}; font-size: 12px; font-weight: bold; }}
+QLabel#ghostTotal    {{ font-size: 12px; font-weight: bold; font-family: Consolas, monospace; }}
+QLabel#ghostHint {{ color: {COLORS['subtext']}; font-size: 12px; }}
 QPushButton#modeBtn {{
     background-color: {COLORS['btn']}; color: {COLORS['text']}; border: none;
-    border-radius: 3px; padding: 3px 9px; font-size: 10px; font-weight: bold;
+    border-radius: 3px; padding: 3px 9px; font-size: 11px; font-weight: bold;
 }}
 QPushButton#modeBtn:hover {{ background-color: {COLORS['btn_hover']}; }}
 QPushButton#modeBtn:checked {{ background-color: {COLORS['btn_hover']}; }}
 QPushButton#tfBtn {{
     background-color: {COLORS['panel']}; color: {COLORS['subtext']};
     border: 1px solid {COLORS['accent']}; border-radius: 3px;
-    font-size: 9px; font-weight: bold; padding: 0px;
+    font-size: 10px; font-weight: bold; padding: 0px;
 }}
 QPushButton#tfBtn:hover {{ background-color: {COLORS['accent']}; color: {COLORS['text']}; }}
 QPushButton#tfBtn:checked {{
@@ -100,7 +100,7 @@ QPushButton#tfBtn:checked {{
 QComboBox#ghostSymbol {{
     background-color: {COLORS['panel']}; color: {COLORS['text']};
     border: 1px solid {COLORS['accent']}; border-radius: 3px;
-    padding: 1px 5px; font-size: 10px;
+    padding: 1px 5px; font-size: 12px;
 }}
 QComboBox#ghostSymbol::drop-down {{
     border: none; background-color: {COLORS['accent']}; width: 14px;
@@ -181,12 +181,12 @@ class MiniChart(QWidget):
 
         if len(self._bars) < 2:
             p.setPen(QColor(COLORS["subtext"]))
-            p.setFont(QFont("Segoe UI", 8))
+            p.setFont(QFont("Segoe UI", 10))
             msg = "No chart data" if self._symbol else "Pick a symbol"
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, msg)
             return
 
-        pad_r = 48          # room for the price tag
+        pad_r = 50          # room for the price tag
         pad_v = 6
         plot_w = max(1, w - pad_r - 4)
         plot_h = max(1, h - 2 * pad_v)
@@ -234,7 +234,7 @@ class MiniChart(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         # legend, top-left — the lines are otherwise easy to mix up
-        p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
+        p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
         lx = 5
         for values, (period, key, _) in zip(self._emas, self.EMA_SPECS):
             if not values:
@@ -242,7 +242,7 @@ class MiniChart(QWidget):
             p.setPen(QColor(COLORS[key]))
             p.drawText(QRectF(lx, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
                        f"EMA{period}")
-            lx += 33 if period < 10 else 38
+            lx += 37 if period < 10 else 43
 
         # last price: dashed level plus a tag in the right margin
         last = float(self._bars[-1]["close"])
@@ -253,14 +253,14 @@ class MiniChart(QWidget):
         p.setPen(pen)
         p.drawLine(4, int(ly), w - pad_r, int(ly))
 
-        p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+        p.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
         p.setPen(tag_color)
         p.drawText(QRectF(w - pad_r + 2, ly - 8, pad_r - 4, 16),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                    f"{last:,.{self._digits}f}")
 
         # high / low of the window, top-right and bottom-right
-        p.setFont(QFont("Consolas", 7))
+        p.setFont(QFont("Consolas", 8))
         p.setPen(QColor(COLORS["subtext"]))
         p.drawText(QRectF(w - pad_r + 2, pad_v - 3, pad_r - 4, 12),
                    Qt.AlignmentFlag.AlignLeft, f"{hi:,.{self._digits}f}")
@@ -284,7 +284,7 @@ class GhostPanel(QWidget):
     CHART_TIMEFRAMES = ("M1", "M5", "M15", "H1", "H4")
     DEFAULT_TIMEFRAME = "M15"
 
-    CONTENT_WIDTH = 300
+    CONTENT_WIDTH = 280
     # Height the overlay grows by when the chart area opens
     CHART_AREA_HEIGHT = 186
 
@@ -316,8 +316,8 @@ class GhostPanel(QWidget):
         compact_btn = QPushButton()
         compact_btn.setObjectName("modeBtn")
         compact_btn.setIcon(_make_compact_icon())
-        compact_btn.setIconSize(QSize(14, 14))
-        compact_btn.setFixedSize(26, 22)
+        compact_btn.setIconSize(QSize(16, 16))
+        compact_btn.setFixedSize(30, 26)
         compact_btn.setToolTip("Compact mode")
         compact_btn.clicked.connect(self.switch_compact)
         header.addWidget(compact_btn)
@@ -325,8 +325,8 @@ class GhostPanel(QWidget):
         normal_btn = QPushButton()
         normal_btn.setObjectName("modeBtn")
         normal_btn.setIcon(_make_normal_icon())
-        normal_btn.setIconSize(QSize(14, 14))
-        normal_btn.setFixedSize(26, 22)
+        normal_btn.setIconSize(QSize(16, 16))
+        normal_btn.setFixedSize(30, 26)
         normal_btn.setToolTip("Normal mode")
         normal_btn.clicked.connect(self.switch_normal)
         header.addWidget(normal_btn)
@@ -335,7 +335,7 @@ class GhostPanel(QWidget):
 
         # Balance / Equity / today's realized P/L line
         acct = QHBoxLayout()
-        acct.setSpacing(12)
+        acct.setSpacing(8)
         self._bal_lbl = QLabel("Bal —")
         self._bal_lbl.setObjectName("ghostHint")
         self._eq_lbl = QLabel("Eq —")
@@ -364,7 +364,7 @@ class GhostPanel(QWidget):
 
         self._opacity_lbl = QLabel(f"{DEFAULT_OPACITY_PCT}%")
         self._opacity_lbl.setObjectName("ghostHint")
-        self._opacity_lbl.setFixedWidth(34)
+        self._opacity_lbl.setFixedWidth(40)
         self._opacity_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         opacity_row.addWidget(self._opacity_lbl)
 
@@ -389,8 +389,8 @@ class GhostPanel(QWidget):
         for col in (1, 2, 3, 4):
             hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(1, 42)    # Type
-        self._table.setColumnWidth(2, 48)    # Volume
-        self._table.setColumnWidth(3, 74)    # P/L
+        self._table.setColumnWidth(2, 52)    # Volume
+        self._table.setColumnWidth(3, 78)    # P/L
         self._table.setColumnWidth(4, 28)    # close
         layout.addWidget(self._table)
 
@@ -413,7 +413,7 @@ class GhostPanel(QWidget):
             b = QPushButton(tf)
             b.setObjectName("tfBtn")
             b.setCheckable(True)
-            b.setFixedSize(28, 18)
+            b.setFixedSize(26, 20)
             b.setChecked(tf == self.DEFAULT_TIMEFRAME)
             b.setToolTip(f"Show {tf} candles")
             b.clicked.connect(lambda _=False, t=tf: self._on_timeframe_clicked(t))
@@ -424,7 +424,7 @@ class GhostPanel(QWidget):
         pick.addStretch()
         self._symbol_combo = QComboBox()
         self._symbol_combo.setObjectName("ghostSymbol")
-        self._symbol_combo.setFixedWidth(112)
+        self._symbol_combo.setFixedWidth(120)
         self._symbol_combo.setToolTip("Symbols in the MT5 Market Watch")
         self._symbol_combo.currentTextChanged.connect(self._on_symbol_changed)
         pick.addWidget(self._symbol_combo)
@@ -445,7 +445,7 @@ class GhostPanel(QWidget):
         self._chart_btn = QPushButton("▸ M15 Chart")
         self._chart_btn.setObjectName("modeBtn")
         self._chart_btn.setCheckable(True)
-        self._chart_btn.setFixedHeight(20)
+        self._chart_btn.setFixedHeight(24)
         self._chart_btn.setToolTip("Show the chart for a symbol")
         self._chart_btn.toggled.connect(self._on_chart_toggled)
         bottom.addWidget(self._chart_btn)
@@ -606,6 +606,11 @@ class GhostPanel(QWidget):
         item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         item.setForeground(QColor(COLORS["green"] if profit >= 0 else COLORS["red"]))
+        # Pixels, to match the 12px labels above. The table's own font is set
+        # in points, which is a different scale entirely.
+        font = QFont("Consolas")
+        font.setPixelSize(14)
+        item.setFont(font)
         self._table.setItem(row, 3, item)
 
     def update_account(self, balance: float, equity: float, profit: float) -> None:
@@ -613,7 +618,7 @@ class GhostPanel(QWidget):
         color = COLORS["green"] if profit >= 0 else COLORS["red"]
         self._total.setText(f"{sign}${profit:,.2f}")
         self._total.setStyleSheet(
-            f"color: {color}; font-size: 14px; font-weight: bold; font-family: Consolas, monospace;"
+            f"color: {color}; font-size: 12px; font-weight: bold; font-family: Consolas, monospace;"
         )
         self._bal_lbl.setText(f"Bal ${balance:,.2f}")
         self._eq_lbl.setText(f"Eq ${equity:,.2f}")
@@ -632,7 +637,7 @@ class GhostPanel(QWidget):
         color = COLORS["green"] if net >= 0 else COLORS["red"]
         self._net_lbl.setText(f"Net {sign}${abs(net):,.2f}")
         self._net_lbl.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-weight: bold;"
+            f"color: {color}; font-size: 12px; font-weight: bold;"
         )
 
     # ------------------------------------------------------------------
