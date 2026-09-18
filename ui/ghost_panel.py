@@ -55,6 +55,17 @@ def _make_x_icon(size: int = 14, color: str = "#ffffff") -> QIcon:
     return QIcon(pm)
 
 
+def _make_minimize_icon(size: int = 14, color: str = "#eaeaea") -> QIcon:
+    """A single low bar — the standard minimize glyph."""
+    pm = _blank_pixmap(size)
+    p = QPainter(pm)
+    p.setPen(QPen(QColor(color), 1.8))
+    y = size - 5
+    p.drawLine(3, y, size - 3, y)
+    p.end()
+    return QIcon(pm)
+
+
 def _make_compact_icon(size: int = 14, color: str = "#eaeaea") -> QIcon:
     """Stacked rows — represents the compact orders view."""
     pm = _blank_pixmap(size)
@@ -272,6 +283,7 @@ class GhostPanel(QWidget):
     """Minimal always-on-top overlay: active orders with P/L and a close button,
     plus quick switches back to Compact / Normal mode."""
 
+    minimize_requested   = Signal()
     switch_normal        = Signal()
     switch_compact       = Signal()
     close_order_requested = Signal(object)   # ticket (closes 100%); object avoids
@@ -330,6 +342,15 @@ class GhostPanel(QWidget):
         normal_btn.setToolTip("Normal mode")
         normal_btn.clicked.connect(self.switch_normal)
         header.addWidget(normal_btn)
+
+        minimize_btn = QPushButton()
+        minimize_btn.setObjectName("modeBtn")
+        minimize_btn.setIcon(_make_minimize_icon())
+        minimize_btn.setIconSize(QSize(16, 16))
+        minimize_btn.setFixedSize(30, 26)
+        minimize_btn.setToolTip("Minimize — restore from the taskbar")
+        minimize_btn.clicked.connect(self.minimize_requested)
+        header.addWidget(minimize_btn)
 
         layout.addLayout(header)
 

@@ -332,6 +332,7 @@ class MainWindow(QMainWindow):
 
         # Ghost mode overlay — hidden until activated
         self._ghost_panel = GhostPanel()
+        self._ghost_panel.minimize_requested.connect(self.showMinimized)
         self._ghost_panel.switch_normal.connect(lambda: self._apply_mode("normal"))
         self._ghost_panel.switch_compact.connect(lambda: self._apply_mode("compact"))
         self._ghost_panel.close_order_requested.connect(lambda t: self._on_close_order(t, 100.0))
@@ -970,6 +971,8 @@ class MainWindow(QMainWindow):
                 self._ghost_chart_timer.start()
 
     def _remember_ghost_height(self) -> None:
+        if self.isMinimized():
+            return          # keep the last real height, not the minimized one
         self._ghost_height = max(150, self.height())
         self.settings.set("ghost_height", self._ghost_height)
 
