@@ -225,6 +225,9 @@ class MainWindow(QMainWindow):
         # (fetched_at, net) for the ghost overlay's "closed today" figure — the
         # order refresh runs at 100ms and a history query per tick is waste
         self._ghost_net_cache: tuple[float, float] | None = None
+        # signature of the last bars handed to the ghost chart, to skip a
+        # repaint (and EMA recompute) when the tick brought nothing new
+        self._ghost_chart_sig: tuple | None = None
 
         self.setWindowTitle(f"{APP_NAME}  v{__version__}")
         self.resize(840, 700)          # 30% narrower default than the old 1200
@@ -443,10 +446,13 @@ class MainWindow(QMainWindow):
         self._autotrade_timer.timeout.connect(self.auto_trader.on_tick)
 
         # Watchlist trend-scan loop
-        # M15 bars for the ghost chart move slowly; 5s is ample and keeps the
-        # fetch off the 100ms order-refresh path.
+        # The ghost chart's newest candle is the forming bar, so it should
+        # tick with price. 500ms feels live; copy_rates_from_pos is a local
+        # in-memory read from the terminal (~150 bars, sub-millisecond), and
+        # the order refresh already polls at 100ms. Redraws are skipped when
+        # nothing changed, so a quiet market costs nothing.
         self._ghost_chart_timer = QTimer(self)
-        self._ghost_chart_timer.setInterval(5000)
+        self._ghost_chart_timer.setInterval(500)
         self._ghost_chart_timer.timeout.connect(self._refresh_ghost_chart)
 
         self._watchlist_timer = QTimer(self)
@@ -868,9 +874,21 @@ class MainWindow(QMainWindow):
             return
         symbol = self._ghost_panel.chart_symbol()
         if not self._connected or not symbol:
+            self._ghost_chart_sig = None
             self._ghost_panel.set_chart_bars(None)
             return
-        bars = self.connector.copy_rates(symbol, self._ghost_panel.chart_timeframe(), 150)
+        tf = self._ghost_panel.chart_timeframe()
+        bars = self.connector.copy_rates(symbol, tf, 150)
+        if bars is None or len(bars) == 0:
+            self._ghost_chart_sig = None
+            self._ghost_panel.set_chart_bars(None)
+            return
+        last = bars[-1]
+        sig = (symbol, tf, len(bars), float(last["time"]), float(last["open"]),
+               float(last["high"]), float(last["low"]), float(last["close"]))
+        if sig == self._ghost_chart_sig:
+            return                      # same forming bar, same price: nothing to draw
+        self._ghost_chart_sig = sig
         self._ghost_panel.set_chart_bars(bars, self.connector.symbol_digits(symbol))
 
     def _today_realized_net(self) -> float | None:
