@@ -165,7 +165,26 @@ class MiniChart(QWidget):
         self._emas: list[list[float]] = []
         self._symbol = ""
         self._digits = 5
+        self._levels: dict | None = None      # entry / sl / tp of a clicked order
         self.setMinimumHeight(120)
+
+    def set_levels(self, levels: dict | None) -> None:
+        """Show an order's entry/SL/TP as horizontal lines, or None to clear.
+
+        *levels* carries "entry", "sl", "tp" (0 or None where unset) and
+        "type" for the tooltip.
+        """
+        self._levels = levels
+        if levels:
+            bits = [f"{levels['type']} @ {levels['entry']:,.{self._digits}f}"]
+            if levels.get("sl"):
+                bits.append(f"SL {levels['sl']:,.{self._digits}f}")
+            if levels.get("tp"):
+                bits.append(f"TP {levels['tp']:,.{self._digits}f}")
+            self.setToolTip("\n".join(bits))
+        else:
+            self.setToolTip("")
+        self.update()
 
     def set_bars(self, bars, symbol: str = "", digits: int = 5) -> None:
         self._symbol = symbol
@@ -205,6 +224,19 @@ class MiniChart(QWidget):
         highs = [float(b["high"]) for b in self._bars]
         lows = [float(b["low"]) for b in self._bars]
         hi, lo = max(highs), min(lows)
+
+        # Pull the order's levels into view, but cap how far they may stretch
+        # the scale: a take-profit hundreds of pips out would otherwise flatten
+        # the candles into a line. Anything beyond the cap is clamped to the
+        # edge when drawn, so it still reads as "off in that direction".
+        bar_span = (hi - lo) or 1e-9
+        if self._levels:
+            room = bar_span * 1.5
+            for key in ("entry", "sl", "tp"):
+                v = self._levels.get(key) or 0.0
+                if v:
+                    hi = max(hi, min(v, hi + room))
+                    lo = min(lo, max(v, lo - room))
         span = (hi - lo) or 1e-9
 
         def y(v: float) -> float:
@@ -254,6 +286,28 @@ class MiniChart(QWidget):
             p.drawText(QRectF(lx, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
                        f"EMA{period}")
             lx += 37 if period < 10 else 43
+
+        # order levels: entry / stop / target of the row the user clicked
+        if self._levels:
+            p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+            for key, label, colour in (("entry", "E", COLORS["text"]),
+                                       ("sl", "SL", COLORS["red"]),
+                                       ("tp", "TP", COLORS["green"])):
+                v = self._levels.get(key) or 0.0
+                if not v:
+                    continue
+                clamped = min(max(v, lo), hi)     # off-scale levels ride the edge
+                ly = y(clamped)
+                p.setPen(QPen(QColor(colour), 1, Qt.PenStyle.DashLine))
+                p.drawLine(4, int(ly), w - pad_r, int(ly))
+                mark = label if clamped == v else (label + ("↑" if v > hi else "↓"))
+                # a backing chip keeps the tag readable where a line crosses
+                # the EMA legend or a price label
+                chip = QRectF(5, ly - 7, 9 + 7 * len(mark), 13)
+                p.fillRect(chip, QColor(COLORS["panel"]))
+                p.setPen(QColor(colour))
+                p.drawText(chip.adjusted(3, 0, 0, 0),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, mark)
 
         # last price: dashed level plus a tag in the right margin
         last = float(self._bars[-1]["close"])
@@ -307,6 +361,8 @@ class GhostPanel(QWidget):
         self._x_icon = _make_x_icon()
         self._drag_pos = None
         self._tickets: list[int] = []
+        self._last_orders: list[Order] = []
+        self._chart_ticket: int | None = None   # order whose levels the chart shows
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -475,15 +531,43 @@ class GhostPanel(QWidget):
         layout.addLayout(bottom)
 
     def _on_order_clicked(self, row: int, _col: int) -> None:
-        """Chart the clicked order's symbol.
+        """Chart the clicked order's symbol and mark its entry, SL and TP.
 
-        Never opens the chart area: if it is collapsed the symbol is still
-        selected (and persisted), so it is already showing when the user
-        opens it themselves.
+        Never opens the chart area: if it is collapsed the symbol and levels
+        are still set, so they are already showing when the user opens it.
         """
         item = self._table.item(row, 0)
-        if item is not None:
-            self.select_chart_symbol(item.text())
+        if item is None or row >= len(self._last_orders):
+            return
+        order = self._last_orders[row]
+        # select_chart_symbol emits, and _on_symbol_changed clears the levels,
+        # so set them after it rather than before
+        self.select_chart_symbol(item.text())
+        self._chart_ticket = order.ticket
+        self._show_order_levels(order)
+
+    def _sync_order_levels(self) -> None:
+        """Keep the drawn levels matching the charted order.
+
+        SL and TP can be moved from the terminal, and the order can close
+        while its levels are on screen — in which case they are cleared.
+        """
+        if self._chart_ticket is None:
+            return
+        for order in self._last_orders:
+            if order.ticket == self._chart_ticket:
+                self._show_order_levels(order)
+                return
+        self._chart_ticket = None
+        self._chart.set_levels(None)
+
+    def _show_order_levels(self, order: Order) -> None:
+        self._chart.set_levels({
+            "entry": order.open_price,
+            "sl": order.sl,
+            "tp": order.tp,
+            "type": order.order_type,
+        })
 
     def _on_timeframe_clicked(self, tf: str) -> None:
         self._tf_btns[tf].setChecked(True)
@@ -500,6 +584,8 @@ class GhostPanel(QWidget):
         self.chart_toggled.emit(shown)
 
     def _on_symbol_changed(self, symbol: str) -> None:
+        self._chart_ticket = None
+        self._chart.set_levels(None)
         if symbol:
             self.chart_symbol_changed.emit(symbol)
 
@@ -580,12 +666,14 @@ class GhostPanel(QWidget):
     # ------------------------------------------------------------------
 
     def update_orders(self, orders: list[Order]) -> None:
+        self._last_orders = list(orders)
         new_tickets = [o.ticket for o in orders]
         if new_tickets == self._tickets:
             # Same orders — refresh only the live P/L; keep the close buttons
             # intact so a click isn't interrupted by the 100ms rebuild
             for row, order in enumerate(orders):
                 self._set_pl(row, order.profit)
+            self._sync_order_levels()
             return
 
         self._tickets = new_tickets
@@ -620,6 +708,8 @@ class GhostPanel(QWidget):
             )
             btn.clicked.connect(lambda _=False, t=order.ticket: self.close_order_requested.emit(t))
             self._table.setCellWidget(row, 4, btn)
+
+        self._sync_order_levels()
 
     def _set_pl(self, row: int, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
