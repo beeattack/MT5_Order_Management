@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QRadioButton, QButtonGroup, QFileDialog, QFrame,
 )
 from PySide6.QtCore import Qt, QObject, QTimer, Signal, QRectF, QPointF
-from PySide6.QtGui import QPainter, QColor, QRadialGradient, QPen
+from PySide6.QtGui import QPainter, QColor, QRadialGradient, QPen, QFont
 
 from core.interval_alarm import INTERVAL_OPTIONS, DEFAULT_INTERVAL, next_due
 from utils.sound import AlarmSound, SOUND_FILTER, is_supported_sound
@@ -58,6 +58,7 @@ class AlarmEngine(QObject):
         self._ringing = False
         self._blink_on = False
         self._rang_at: datetime | None = None
+        self._shown_minutes: int | None = None   # last countdown value painted
         self._sound = AlarmSound()
 
         self._tick = QTimer(self)
@@ -94,6 +95,22 @@ class AlarmEngine(QObject):
     def blink_on(self) -> bool:
         return self._blink_on
 
+    def minutes_remaining(self) -> int | None:
+        """Whole minutes until the next alarm, rounded up.
+
+        Rounded up so the bulb reads 1 for the final minute rather than
+        sitting on 0, and never shows 0 while still counting.
+        """
+        if self._due is None or self._ringing:
+            return None
+        seconds = (self._due - datetime.now()).total_seconds()
+        if seconds <= 0:
+            return 0
+        minutes = int(seconds // 60) + (1 if seconds % 60 else 0)
+        # rounding up a hair over a whole interval (firing a few ms early)
+        # would read as 16 on a 15-minute alarm
+        return min(minutes, self._interval)
+
     def configure(self, interval: int, mode: str = MODE_BLINK,
                   sound_file: str = "", *, emit: bool = False) -> None:
         """Apply settings and re-arm from the clock."""
@@ -122,6 +139,11 @@ class AlarmEngine(QObject):
 
     def _on_tick(self) -> None:
         now = datetime.now()
+        # repaint when the displayed minute rolls over, not every second
+        minutes = self.minutes_remaining()
+        if minutes != self._shown_minutes:
+            self._shown_minutes = minutes
+            self.state_changed.emit()
         if self._ringing:
             if self._rang_at and (now - self._rang_at).total_seconds() >= RING_SECONDS:
                 self.dismiss()
@@ -250,6 +272,18 @@ class AlarmBulb(QWidget):
         p.setBrush(grad)
         p.setPen(QPen(QColor(0, 0, 0, 90), 1))
         p.drawEllipse(rect)
+
+        # minutes left, centred in the bulb — dark on the lit face, which
+        # reads better than white against green
+        minutes = self._engine.minutes_remaining()
+        if minutes is not None:
+            text = str(minutes)
+            size = max(7, int(rect.height() * (0.62 if len(text) < 2 else 0.52)))
+            font = QFont("Segoe UI", size, QFont.Weight.Bold)
+            font.setPixelSize(size)
+            p.setFont(font)
+            p.setPen(QColor("#10233a") if lit else QColor(_SUBTEXT))
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
 
 class AlarmSettingsDialog(QDialog):
