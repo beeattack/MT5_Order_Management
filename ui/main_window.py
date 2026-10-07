@@ -20,6 +20,7 @@ from ui.autotrade_panel  import AutoTradePanel
 from ui.dashboard_panel  import DashboardPanel
 from ui.watchlist_panel  import WatchlistPanel
 from ui.tradeplan_panel  import TradePlanPanel
+from ui.alarm_bulb       import AlarmEngine, MODE_BLINK
 from ui.ghost_panel      import GhostPanel
 
 from core.auto_trader import AutoTrader
@@ -214,6 +215,9 @@ class MainWindow(QMainWindow):
         self.history_mgr = history_mgr
 
         self.settings = SettingsStore()
+        # one alarm shared by the main window and ghost bulbs
+        self.alarm = AlarmEngine(self)
+        self.alarm.settings_changed.connect(self._save_alarm_settings)
 
         self._connected = False
         self._mode = "normal"        # "normal" | "compact" | "ghost"
@@ -278,7 +282,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         # Connection bar
-        self._conn_panel = ConnectionPanel()
+        self._conn_panel = ConnectionPanel(self.alarm)
         self._conn_panel.connect_requested.connect(self._on_connect)
         self._conn_panel.disconnect_requested.connect(self._on_disconnect)
         self._conn_panel.display_mode_toggled.connect(self._toggle_display_mode)
@@ -334,7 +338,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._tabs)
 
         # Ghost mode overlay — hidden until activated
-        self._ghost_panel = GhostPanel()
+        self._ghost_panel = GhostPanel(self.alarm)
         self._ghost_panel.minimize_requested.connect(self.showMinimized)
         self._ghost_panel.switch_normal.connect(lambda: self._apply_mode("normal"))
         self._ghost_panel.switch_compact.connect(lambda: self._apply_mode("compact"))
@@ -348,6 +352,11 @@ class MainWindow(QMainWindow):
 
     def _restore_settings(self) -> None:
         """Apply persisted settings to the freshly-built widgets."""
+        self.alarm.configure(
+            int(self.settings.get("alarm_interval_min", 0)),
+            str(self.settings.get("alarm_sound_mode", MODE_BLINK)),
+            str(self.settings.get("alarm_sound_file", "")),
+        )
         saved_tz = self.settings.get("timezone")
         if saved_tz:
             # Setting the combo emits timezone_changed → panels + re-save (no-op).
@@ -650,6 +659,13 @@ class MainWindow(QMainWindow):
             self._watchlist_panel.log_message(
                 f"Refreshed {count} symbol{'s' if count != 1 else ''}{quiet}."
             )
+
+    def _save_alarm_settings(self) -> None:
+        self.settings.update({
+            "alarm_interval_min": self.alarm.interval(),
+            "alarm_sound_mode": self.alarm.mode(),
+            "alarm_sound_file": self.alarm.sound_file(),
+        })
 
     def _on_watch_alert(self, symbol: str, timeframe: str, reading) -> None:
         self._watchlist_panel.log_alert(symbol, timeframe, reading)

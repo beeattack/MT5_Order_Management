@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
+from ui.alarm_bulb import AlarmBulb, AlarmEngine
 from utils.timezone_manager import TIMEZONE_OPTIONS, DEFAULT_TZ
 
 COLORS = {
@@ -100,8 +101,9 @@ class ConnectionPanel(QWidget):
     NORMAL_HEIGHT = 76    # two rows: status/controls + account stats
     COMPACT_HEIGHT = 38   # single row (stats shown in the orders panel instead)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, alarm: AlarmEngine, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._alarm = alarm
         self.setObjectName("ConnectionPanel")
         self.setFixedHeight(self.NORMAL_HEIGHT)
         self.setStyleSheet(_PANEL_QSS)
@@ -167,6 +169,11 @@ class ConnectionPanel(QWidget):
         self._ghost_btn.clicked.connect(self.ghost_requested)
         top.addWidget(self._ghost_btn)
 
+        # Interval alarm bulb, far right: green waiting, red blinking when a
+        # clock boundary passes. Double-click opens its settings.
+        self._alarm_bulb = AlarmBulb(self._alarm)
+        top.addWidget(self._alarm_bulb)
+
         outer.addLayout(top)
 
         # ---- Row 2: account stats — hidden in compact mode ----
@@ -184,6 +191,9 @@ class ConnectionPanel(QWidget):
         stats.addLayout(self._make_stat_block("BROKER", "_broker_val"))
         stats.addStretch()
         outer.addWidget(self._stats_widget)
+
+    def alarm_bulb(self) -> AlarmBulb:
+        return self._alarm_bulb
 
     def _make_stat_block(self, key: str, attr: str) -> QHBoxLayout:
         block = QHBoxLayout()

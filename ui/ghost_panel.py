@@ -13,6 +13,7 @@ import numpy as np
 
 from core import indicators
 from models.order import Order
+from ui.alarm_bulb import AlarmBulb, AlarmEngine
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -354,8 +355,10 @@ class GhostPanel(QWidget):
     # Height the overlay grows by when the chart area opens
     CHART_AREA_HEIGHT = 186
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, alarm: AlarmEngine | None = None,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._alarm = alarm
         self.setObjectName("GhostPanel")
         self.setStyleSheet(_PANEL_QSS)
         self._x_icon = _make_x_icon()
@@ -398,6 +401,11 @@ class GhostPanel(QWidget):
         normal_btn.setToolTip("Normal mode")
         normal_btn.clicked.connect(self.switch_normal)
         header.addWidget(normal_btn)
+
+        if self._alarm is not None:
+            # same engine as the main window's bulb, so the two never ring
+            # independently or need dismissing twice
+            header.addWidget(AlarmBulb(self._alarm, size=22))
 
         minimize_btn = QPushButton()
         minimize_btn.setObjectName("modeBtn")
