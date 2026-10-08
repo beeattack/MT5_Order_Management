@@ -201,7 +201,7 @@ class AlarmEngine(QObject):
 class AlarmBulb(QWidget):
     """A view of an AlarmEngine. Several may share one engine."""
 
-    def __init__(self, engine: AlarmEngine, size: int = 26,
+    def __init__(self, engine: AlarmEngine, size: int = 34,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._engine = engine
@@ -247,42 +247,87 @@ class AlarmBulb(QWidget):
         else:
             core, lit = QColor(_GREEN), True
 
-        inset = self.width() * 0.19
+        inset = self.width() * 0.13
         rect = QRectF(inset, inset, self.width() - 2 * inset, self.height() - 2 * inset)
         centre = QPointF(rect.center())
+        d = rect.width()
         halo_r = self.width() / 2.0
+        p.setPen(Qt.PenStyle.NoPen)
 
+        # 1. halo thrown onto the panel behind
         if lit:
-            glow_in = QColor(core)
-            glow_in.setAlpha(110)
-            glow_out = QColor(core)
+            glow_in, glow_out = QColor(core), QColor(core)
+            glow_in.setAlpha(120)
             glow_out.setAlpha(0)
             glow = QRadialGradient(centre, halo_r)
             glow.setColorAt(0.0, glow_in)
+            glow.setColorAt(0.55, glow_in)
             glow.setColorAt(1.0, glow_out)
             p.setBrush(glow)
-            p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(centre, halo_r, halo_r)
 
-        body = QColor(core) if lit else QColor(core).darker(260)
-        grad = QRadialGradient(QPointF(centre.x() - rect.width() / 5,
-                                       centre.y() - rect.height() / 5), rect.width())
-        grad.setColorAt(0.0, body.lighter(150))
-        grad.setColorAt(1.0, body)
-        p.setBrush(grad)
-        p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        body = QColor(core) if lit else QColor(core).darker(250)
+
+        # 2. the sphere, lit from the upper left
+        lamp = QPointF(centre.x() - d * 0.22, centre.y() - d * 0.26)
+        sphere = QRadialGradient(lamp, d * 0.95)
+        sphere.setColorAt(0.0, body.lighter(185))
+        sphere.setColorAt(0.42, body)
+        sphere.setColorAt(1.0, body.darker(175))
+        p.setBrush(sphere)
         p.drawEllipse(rect)
 
-        # minutes left, centred in the bulb — dark on the lit face, which
-        # reads better than white against green
+        # 3. rim shading: transparent through the middle, dark at the edge,
+        #    which is what reads as curvature rather than a flat disc
+        edge_clear, edge_dark = QColor(0, 0, 0, 0), QColor(0, 0, 0, 115)
+        rim = QRadialGradient(centre, d / 2.0)
+        rim.setColorAt(0.0, edge_clear)
+        rim.setColorAt(0.72, edge_clear)
+        rim.setColorAt(1.0, edge_dark)
+        p.setBrush(rim)
+        p.drawEllipse(rect)
+
+        # 4. bounce light along the lower edge, opposite the lamp
+        if lit:
+            bounce_in, bounce_out = QColor(core).lighter(165), QColor(core)
+            bounce_in.setAlpha(130)
+            bounce_out.setAlpha(0)
+            bounce = QRadialGradient(
+                QPointF(centre.x() + d * 0.16, centre.y() + d * 0.34), d * 0.5)
+            bounce.setColorAt(0.0, bounce_in)
+            bounce.setColorAt(1.0, bounce_out)
+            p.setBrush(bounce)
+            p.drawEllipse(rect)
+
+        # 5. specular highlight, kept small and high so it never sits on the
+        #    digits in the middle
+        spec_in, spec_out = QColor(255, 255, 255, 205), QColor(255, 255, 255, 0)
+        spec_c = QPointF(centre.x() - d * 0.21, centre.y() - d * 0.25)
+        spec = QRadialGradient(spec_c, d * 0.27)
+        spec.setColorAt(0.0, spec_in)
+        spec.setColorAt(1.0, spec_out)
+        p.setBrush(spec)
+        p.drawEllipse(spec_c, d * 0.25, d * 0.19)
+
+        # 6. a thin dark outline to separate the bulb from the panel
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(QColor(0, 0, 0, 120), 1))
+        p.drawEllipse(rect)
+
+        # minutes left, centred - dark on the lit face, which reads better
+        # against green than white would
         minutes = self._engine.minutes_remaining()
         if minutes is not None:
             text = str(minutes)
-            size = max(7, int(rect.height() * (0.62 if len(text) < 2 else 0.52)))
+            size = max(8, int(d * (0.70 if len(text) < 2 else 0.58)))
             font = QFont("Segoe UI", size, QFont.Weight.Bold)
             font.setPixelSize(size)
             p.setFont(font)
-            p.setPen(QColor("#10233a") if lit else QColor(_SUBTEXT))
+            # a faint light halo under the glyphs keeps them crisp over the
+            # shaded sphere
+            p.setPen(QColor(255, 255, 255, 70) if lit else QColor(0, 0, 0, 0))
+            p.drawText(rect.translated(0, 1), Qt.AlignmentFlag.AlignCenter, text)
+            p.setPen(QColor("#0d1f33") if lit else QColor(_SUBTEXT))
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
 

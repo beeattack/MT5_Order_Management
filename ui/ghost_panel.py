@@ -405,7 +405,7 @@ class GhostPanel(QWidget):
         if self._alarm is not None:
             # same engine as the main window's bulb, so the two never ring
             # independently or need dismissing twice
-            header.addWidget(AlarmBulb(self._alarm, size=22))
+            header.addWidget(AlarmBulb(self._alarm, size=29))
 
         minimize_btn = QPushButton()
         minimize_btn.setObjectName("modeBtn")

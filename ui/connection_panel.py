@@ -119,6 +119,7 @@ class ConnectionPanel(QWidget):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
+        self._outer = outer
         outer.setContentsMargins(12, 5, 12, 6)
         outer.setSpacing(3)
 
@@ -318,6 +319,9 @@ class ConnectionPanel(QWidget):
         self._compact_layout = compact
         self._stats_widget.setVisible(not compact)
         self._tz_widget.setVisible(not compact)
+        # the alarm bulb is taller than the 38px compact strip allows with the
+        # normal margins, so tighten them rather than growing the header
+        self._outer.setContentsMargins(12, 2, 12, 2) if compact else             self._outer.setContentsMargins(12, 5, 12, 6)
         self.setFixedHeight(self.COMPACT_HEIGHT if compact else self.NORMAL_HEIGHT)
         self._mode_btn.setText("Normal" if compact else "Compact")
         self._refresh_status_label()
