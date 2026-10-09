@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 # Selectable intervals, in minutes. 0 means the alarm is off.
 INTERVAL_OPTIONS: tuple[tuple[int, str], ...] = (
     (0,  "Off"),
+    (1,  "1 minute"),
     (5,  "5 minutes"),
     (15, "15 minutes"),
     (30, "30 minutes"),
