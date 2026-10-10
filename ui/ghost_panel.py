@@ -32,6 +32,10 @@ COLORS = {
     #                           from the warm pair and from the candles
 }
 
+# Per-row close buttons: full / 50% / 80%
+_ACTION_BTN_W = 18
+_ACTIONS_W = _ACTION_BTN_W * 3 + 2 * 2 + 2
+
 # Transparency slider range (window opacity %)
 MIN_OPACITY_PCT = 30
 DEFAULT_OPACITY_PCT = 92
@@ -341,7 +345,7 @@ class GhostPanel(QWidget):
     minimize_requested   = Signal()
     switch_normal        = Signal()
     switch_compact       = Signal()
-    close_order_requested = Signal(object)   # ticket (closes 100%); object avoids
+    close_order_requested = Signal(object, float)   # (ticket, percent); object avoids
     #                                          Qt's 32-bit int limit for large MT5 tickets
     opacity_changed      = Signal(float)  # window opacity 0.30–1.00
     chart_toggled        = Signal(bool)   # expandable chart shown/hidden
@@ -455,8 +459,10 @@ class GhostPanel(QWidget):
 
         layout.addLayout(opacity_row)
 
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(["Symbol", "Type", "Vol", "P/L", ""])
+        # Four columns: BUY/SELL is carried by the symbol's colour rather than
+        # its own column, which is the width the action buttons needed.
+        self._table = QTableWidget(0, 4)
+        self._table.setHorizontalHeaderLabels(["Symbol", "Vol", "P/L", ""])
         self._table.horizontalHeader().setVisible(False)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
@@ -471,12 +477,9 @@ class GhostPanel(QWidget):
         self._table.setFont(QFont("Consolas", 11))
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)   # Symbol
-        for col in (1, 2, 3, 4):
+        for col in (1, 2, 3):
             hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(1, 42)    # Type
-        self._table.setColumnWidth(2, 52)    # Volume
-        self._table.setColumnWidth(3, 78)    # P/L
-        self._table.setColumnWidth(4, 28)    # close
+        self._apply_column_widths()
         layout.addWidget(self._table)
 
         # --- expandable chart area (hidden until the button is pressed) ---
@@ -688,36 +691,65 @@ class GhostPanel(QWidget):
         self._table.setRowCount(0)
         self._table.setRowCount(len(orders))
         for row, order in enumerate(orders):
+            buy = order.order_type == "BUY"
             sym = QTableWidgetItem(order.symbol)
             sym.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            sym.setForeground(QColor(COLORS["green"] if buy else COLORS["red"]))
+            sym.setToolTip(f"{order.order_type}  {order.volume:.2f}  #{order.ticket}")
             self._table.setItem(row, 0, sym)
-
-            typ = QTableWidgetItem(order.order_type)
-            typ.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            typ.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            typ.setForeground(QColor(COLORS["green"] if order.order_type == "BUY" else COLORS["red"]))
-            self._table.setItem(row, 1, typ)
 
             vol = QTableWidgetItem(f"{order.volume:.2f}")
             vol.setFlags(Qt.ItemFlag.ItemIsEnabled)
             vol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._table.setItem(row, 2, vol)
+            self._table.setItem(row, 1, vol)
 
             self._set_pl(row, order.profit)
 
-            btn = QPushButton()
-            btn.setIcon(self._x_icon)
-            btn.setIconSize(QSize(11, 11))
-            btn.setFixedSize(24, 20)
-            btn.setToolTip(f"Close #{order.ticket} (100%)")
-            btn.setStyleSheet(
-                f"QPushButton {{ background-color: {COLORS['red']}; border-radius: 3px; }}"
-                f"QPushButton:hover {{ background-color: #c0392b; }}"
-            )
-            btn.clicked.connect(lambda _=False, t=order.ticket: self.close_order_requested.emit(t))
-            self._table.setCellWidget(row, 4, btn)
+            self._table.setCellWidget(row, 3, self._make_actions(order.ticket))
 
         self._sync_order_levels()
+
+    def _apply_column_widths(self) -> None:
+        self._table.horizontalHeader().setMinimumSectionSize(16)
+        self._table.setColumnWidth(1, 48)           # Volume
+        self._table.setColumnWidth(2, 76)           # P/L
+        self._table.setColumnWidth(3, _ACTIONS_W)   # close buttons
+
+    def _make_actions(self, ticket: int) -> QWidget:
+        """Close buttons for one row: full, 50% and 80%.
+
+        Labels are bare digits because the whole cluster has to live in the
+        column width the overlay can spare at 280px.
+        """
+        wrap = QWidget()
+        wrap.setStyleSheet("background-color: transparent;")
+        lay = QHBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        lay.addStretch()
+
+        for label, pct, colour, tip in (
+            ("", 100.0, COLORS["red"], "Close #%d (100%%)" % ticket),
+            ("5", 50.0, COLORS["amber"], "Close 50%% of #%d" % ticket),
+            ("8", 80.0, COLORS["amber"], "Close 80%% of #%d" % ticket),
+        ):
+            btn = QPushButton(label)
+            btn.setFixedSize(_ACTION_BTN_W, 20)
+            btn.setToolTip(tip)
+            if not label:
+                btn.setIcon(self._x_icon)
+                btn.setIconSize(QSize(10, 10))
+            text_colour = "#ffffff" if not label else "#1a1a2e"
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: {colour}; color: {text_colour};"
+                f" border-radius: 3px; font-size: 11px; font-weight: bold; padding: 0px; }}"
+                f"QPushButton:hover {{ background-color: {COLORS['btn_hover']};"
+                f" color: {COLORS['text']}; }}"
+            )
+            btn.clicked.connect(
+                lambda _=False, t=ticket, p=pct: self.close_order_requested.emit(t, p))
+            lay.addWidget(btn)
+        return wrap
 
     def _set_pl(self, row: int, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
@@ -730,7 +762,7 @@ class GhostPanel(QWidget):
         font = QFont("Consolas")
         font.setPixelSize(14)
         item.setFont(font)
-        self._table.setItem(row, 3, item)
+        self._table.setItem(row, 2, item)
 
     def update_account(self, balance: float, equity: float, profit: float) -> None:
         sign = "+" if profit >= 0 else ""

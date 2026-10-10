@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
         self._ghost_panel.minimize_requested.connect(self.showMinimized)
         self._ghost_panel.switch_normal.connect(lambda: self._apply_mode("normal"))
         self._ghost_panel.switch_compact.connect(lambda: self._apply_mode("compact"))
-        self._ghost_panel.close_order_requested.connect(lambda t: self._on_close_order(t, 100.0))
+        self._ghost_panel.close_order_requested.connect(self._on_close_order)
         self._ghost_panel.opacity_changed.connect(self._on_ghost_opacity)
         self._ghost_panel.chart_toggled.connect(self._on_ghost_chart_toggled)
         self._ghost_panel.chart_symbol_changed.connect(self._on_ghost_chart_symbol)
