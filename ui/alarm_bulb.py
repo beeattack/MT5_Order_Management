@@ -63,6 +63,9 @@ class AlarmEngine(QObject):
         self._ringing = False
         self._blink_on = False
         self._rang_at: datetime | None = None
+        # set when the user silences the amber run-up, so the tick does not
+        # immediately restart it; cleared when the window is left
+        self._warn_dismissed = False
         self._shown_seconds: int | None = None   # last countdown value painted
         self._sound = AlarmSound()
         self._warn_sound = AlarmSound()
@@ -109,8 +112,8 @@ class AlarmEngine(QObject):
         return self._blink_on
 
     def is_warning(self) -> bool:
-        """In the amber run-up: armed, counting, and nearly due."""
-        if self._ringing:
+        """In the amber run-up: armed, counting, nearly due, not yet silenced."""
+        if self._ringing or self._warn_dismissed:
             return False
         secs = self.seconds_remaining()
         return secs is not None and 0 < secs <= WARN_SECONDS
@@ -141,10 +144,26 @@ class AlarmEngine(QObject):
         self._warn_sound_file = (warn_sound_file
                                  if is_supported_sound(warn_sound_file) else "")
         self.dismiss()
+        self._warn_dismissed = False
         self._due = next_due(datetime.now(), self._interval)
         self.state_changed.emit()
         if emit:
             self.settings_changed.emit()
+
+    def acknowledge(self) -> None:
+        """What a click on the bulb does, whichever phase is showing."""
+        if self._ringing:
+            self.dismiss()
+        elif self.is_warning():
+            self.dismiss_warning()
+
+    def dismiss_warning(self) -> None:
+        """Silence the amber run-up. The alarm itself still rings at zero."""
+        self._warn_dismissed = True
+        self._blink.stop()
+        self._blink_on = False
+        self._stop_warn_sound()
+        self.state_changed.emit()
 
     def dismiss(self) -> None:
         """Stop a ringing alarm (user click, or the ring running its course)."""
@@ -183,6 +202,7 @@ class AlarmEngine(QObject):
         if (self._due - now).total_seconds() > self._interval * 60:
             # clock moved backwards (NTP correction, timezone change): re-arm
             self._due = next_due(now, self._interval)
+            self._warn_dismissed = False
             self.state_changed.emit()
 
         # amber run-up: the same blink timer as the alarm, started early
@@ -200,6 +220,7 @@ class AlarmEngine(QObject):
             self.state_changed.emit()
 
     def _start_ringing(self, now: datetime) -> None:
+        self._warn_dismissed = False     # a fresh run-up next cycle
         self._ringing = True
         self._rang_at = now
         self._blink_on = True
@@ -242,7 +263,7 @@ class AlarmEngine(QObject):
         if self._ringing:
             return f"Alarm - click to stop  (every {label})"
         if self.is_warning():
-            return f"Due in {self.seconds_remaining()}s  (every {label})"
+            return f"Due in {self.seconds_remaining()}s - click to silence  (every {label})"
         due = f"{self._due:%H:%M}" if self._due else "-"
         sound = ""
         if self._mode == MODE_SOUND:
@@ -270,8 +291,9 @@ class AlarmBulb(QWidget):
     # -- interaction ---------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._engine.is_ringing():
-            self._engine.dismiss()
+        if event.button() == Qt.MouseButton.LeftButton and (
+                self._engine.is_ringing() or self._engine.is_warning()):
+            self._engine.acknowledge()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -409,10 +431,12 @@ class BulbWithClock(QWidget):
         super().__init__(parent)
         self._fmt = "%H:%M:%S" if seconds else "%H:%M"
         self._bulb = AlarmBulb(engine, size=size)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._clock = QLabel()
         self._clock.setObjectName("bulbClock")
         self._clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._clock.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._clock.setStyleSheet(
             f"color: {_SUBTEXT}; font-family: Consolas, monospace;"
             f" font-size: {10 if seconds else 9}px; font-weight: bold;"
@@ -433,6 +457,24 @@ class BulbWithClock(QWidget):
 
     def bulb(self) -> AlarmBulb:
         return self._bulb
+
+    # The bulb is small and the clock beneath makes this block wider than it;
+    # a click anywhere in the block counts, so the user is not aiming at a
+    # 29px target to silence an alarm.
+    def mousePressEvent(self, event) -> None:
+        engine = self._bulb._engine
+        if event.button() == Qt.MouseButton.LeftButton and (
+                engine.is_ringing() or engine.is_warning()):
+            engine.acknowledge()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._bulb.mouseDoubleClickEvent(event)
+            return
+        super().mouseDoubleClickEvent(event)
 
     def _refresh(self) -> None:
         now = datetime.now()
