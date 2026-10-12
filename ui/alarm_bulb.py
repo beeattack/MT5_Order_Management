@@ -25,6 +25,7 @@ from core.interval_alarm import INTERVAL_OPTIONS, DEFAULT_INTERVAL, next_due
 from utils.sound import AlarmSound, SOUND_FILTER, is_supported_sound
 
 _GREEN = "#00b894"
+_AMBER = "#e8a838"
 _RED = "#e74c3c"
 _GREY = "#55596b"
 _TEXT = "#eaeaea"
@@ -36,6 +37,8 @@ _BTN_HOVER = "#1a4a8a"
 
 # How long an unattended alarm rings before stopping itself.
 RING_SECONDS = 15
+# The bulb blinks amber for this long before the countdown reaches zero.
+WARN_SECONDS = 10
 _BLINK_MS = 450
 _SOUND_POLL_MS = 300
 
@@ -55,12 +58,14 @@ class AlarmEngine(QObject):
         self._interval = DEFAULT_INTERVAL
         self._mode = MODE_BLINK
         self._sound_file = ""
+        self._warn_sound_file = ""
         self._due: datetime | None = None
         self._ringing = False
         self._blink_on = False
         self._rang_at: datetime | None = None
         self._shown_seconds: int | None = None   # last countdown value painted
         self._sound = AlarmSound()
+        self._warn_sound = AlarmSound()
 
         self._tick = QTimer(self)
         self._tick.setInterval(1000)
@@ -76,6 +81,10 @@ class AlarmEngine(QObject):
         self._sound_poll.setInterval(_SOUND_POLL_MS)
         self._sound_poll.timeout.connect(self._on_sound_poll)
 
+        self._warn_poll = QTimer(self)
+        self._warn_poll.setInterval(_SOUND_POLL_MS)
+        self._warn_poll.timeout.connect(self._on_warn_poll)
+
     # -- state ---------------------------------------------------------
 
     def interval(self) -> int:
@@ -87,6 +96,9 @@ class AlarmEngine(QObject):
     def sound_file(self) -> str:
         return self._sound_file
 
+    def warn_sound_file(self) -> str:
+        return self._warn_sound_file
+
     def next_due(self) -> datetime | None:
         return self._due
 
@@ -95,6 +107,13 @@ class AlarmEngine(QObject):
 
     def blink_on(self) -> bool:
         return self._blink_on
+
+    def is_warning(self) -> bool:
+        """In the amber run-up: armed, counting, and nearly due."""
+        if self._ringing:
+            return False
+        secs = self.seconds_remaining()
+        return secs is not None and 0 < secs <= WARN_SECONDS
 
     def seconds_remaining(self) -> int | None:
         """Whole seconds until the next alarm.
@@ -112,12 +131,15 @@ class AlarmEngine(QObject):
         return min(int(seconds) + (1 if seconds % 1 else 0), self._interval * 60)
 
     def configure(self, interval: int, mode: str = MODE_BLINK,
-                  sound_file: str = "", *, emit: bool = False) -> None:
+                  sound_file: str = "", warn_sound_file: str = "",
+                  *, emit: bool = False) -> None:
         """Apply settings and re-arm from the clock."""
         valid = {m for m, _ in INTERVAL_OPTIONS}
         self._interval = interval if interval in valid else DEFAULT_INTERVAL
         self._mode = MODE_SOUND if mode == MODE_SOUND else MODE_BLINK
         self._sound_file = sound_file if is_supported_sound(sound_file) else ""
+        self._warn_sound_file = (warn_sound_file
+                                 if is_supported_sound(warn_sound_file) else "")
         self.dismiss()
         self._due = next_due(datetime.now(), self._interval)
         self.state_changed.emit()
@@ -134,6 +156,11 @@ class AlarmEngine(QObject):
         self._blink_on = False
         self._sound_poll.stop()
         self._sound.stop()
+        self._stop_warn_sound()
+
+    def _stop_warn_sound(self) -> None:
+        self._warn_poll.stop()
+        self._warn_sound.stop()
 
     # -- timing --------------------------------------------------------
 
@@ -152,9 +179,24 @@ class AlarmEngine(QObject):
             return
         if now >= self._due:
             self._start_ringing(now)
-        elif (self._due - now).total_seconds() > self._interval * 60:
+            return
+        if (self._due - now).total_seconds() > self._interval * 60:
             # clock moved backwards (NTP correction, timezone change): re-arm
             self._due = next_due(now, self._interval)
+            self.state_changed.emit()
+
+        # amber run-up: the same blink timer as the alarm, started early
+        warning = self.is_warning()
+        if warning and not self._blink.isActive():
+            self._blink_on = True
+            self._blink.start()
+            if self._mode == MODE_SOUND:
+                self._warn_sound.play(self._warn_sound_file)
+                self._warn_poll.start()
+        elif not warning and self._blink.isActive():
+            self._blink.stop()
+            self._blink_on = False
+            self._stop_warn_sound()
             self.state_changed.emit()
 
     def _start_ringing(self, now: datetime) -> None:
@@ -165,6 +207,7 @@ class AlarmEngine(QObject):
         # computed from now, so a machine waking from sleep rings once rather
         # than working through every boundary it missed
         self._due = next_due(now, self._interval)
+        self._stop_warn_sound()     # the run-up is over; hand off to the alarm
         if self._mode == MODE_SOUND:
             self._sound.play(self._sound_file)
             self._sound_poll.start()
@@ -183,6 +226,14 @@ class AlarmEngine(QObject):
         if not self._sound.is_playing():
             self._sound.play(self._sound_file)
 
+    def _on_warn_poll(self) -> None:
+        """Keep the warning sound going for the whole amber run-up."""
+        if not self.is_warning():
+            self._stop_warn_sound()
+            return
+        if not self._warn_sound.is_playing():
+            self._warn_sound.play(self._warn_sound_file)
+
     def describe(self) -> str:
         """Tooltip text for the bulbs."""
         if self._interval <= 0:
@@ -190,6 +241,8 @@ class AlarmEngine(QObject):
         label = dict(INTERVAL_OPTIONS)[self._interval]
         if self._ringing:
             return f"Alarm - click to stop  (every {label})"
+        if self.is_warning():
+            return f"Due in {self.seconds_remaining()}s  (every {label})"
         due = f"{self._due:%H:%M}" if self._due else "-"
         sound = ""
         if self._mode == MODE_SOUND:
@@ -228,10 +281,12 @@ class AlarmBulb(QWidget):
             super().mouseDoubleClickEvent(event)
             return
         dlg = AlarmSettingsDialog(self._engine.interval(), self._engine.mode(),
-                                  self._engine.sound_file(), self)
+                                  self._engine.sound_file(),
+                                  self._engine.warn_sound_file(), self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._engine.configure(dlg.selected_interval(), dlg.selected_mode(),
-                                   dlg.selected_sound(), emit=True)
+                                   dlg.selected_sound(), dlg.selected_warn_sound(),
+                                   emit=True)
         event.accept()
 
     # -- painting ------------------------------------------------------
@@ -244,6 +299,8 @@ class AlarmBulb(QWidget):
             core, lit = QColor(_GREY), False
         elif self._engine.is_ringing():
             core, lit = QColor(_RED), self._engine.blink_on()
+        elif self._engine.is_warning():
+            core, lit = QColor(_AMBER), self._engine.blink_on()
         else:
             core, lit = QColor(_GREEN), True
 
@@ -387,11 +444,13 @@ class AlarmSettingsDialog(QDialog):
     """Interval, blink/sound mode and the sound file."""
 
     def __init__(self, interval: int, mode: str, sound_file: str,
-                 parent: QWidget | None = None) -> None:
+                 warn_sound_file: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Alarm Settings")
         self.setModal(True)
         self._sound_file = sound_file if is_supported_sound(sound_file) else ""
+        self._warn_sound_file = (warn_sound_file
+                                 if is_supported_sound(warn_sound_file) else "")
         self.setStyleSheet(
             f"QDialog {{ background-color: {_BG}; }}"
             f"QLabel {{ color: {_TEXT}; font-size: 12px; }}"
@@ -443,19 +502,14 @@ class AlarmSettingsDialog(QDialog):
         lay.addWidget(blink_rb)
         lay.addWidget(sound_rb)
 
-        file_row = QHBoxLayout()
-        file_row.setSpacing(6)
-        self._file_lbl = QLabel()
-        self._file_lbl.setObjectName("file")
-        self._file_lbl.setMinimumWidth(190)
-        file_row.addWidget(self._file_lbl, 1)
-        browse = QPushButton("Browse...")
-        browse.clicked.connect(self._on_browse)
-        file_row.addWidget(browse)
-        lay.addLayout(file_row)
+        self._file_lbl = self._add_file_row(lay, "Alarm:", self._on_browse)
+        self._warn_file_lbl = self._add_file_row(lay, f"Last {WARN_SECONDS}s:",
+                                                 self._on_browse_warn)
         self._refresh_file_label()
+        self._refresh_warn_file_label()
 
-        ring = QLabel(f"Rings for {RING_SECONDS} seconds, or click the bulb to stop.")
+        ring = QLabel(f"Blinks amber for the last {WARN_SECONDS} seconds, then rings\n"
+                      f"for {RING_SECONDS}, or click the bulb to stop.")
         ring.setObjectName("hint")
         lay.addWidget(ring)
 
@@ -471,13 +525,51 @@ class AlarmSettingsDialog(QDialog):
         lay.addSpacing(4)
         lay.addLayout(row)
 
-    def _refresh_file_label(self) -> None:
-        if self._sound_file:
-            self._file_lbl.setText(os.path.basename(self._sound_file))
-            self._file_lbl.setToolTip(self._sound_file)
+    def _add_file_row(self, lay: QVBoxLayout, caption: str, on_browse) -> QLabel:
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        cap = QLabel(caption)
+        cap.setObjectName("hint")
+        cap.setFixedWidth(56)
+        row.addWidget(cap)
+        label = QLabel()
+        label.setObjectName("file")
+        label.setMinimumWidth(150)
+        row.addWidget(label, 1)
+        browse = QPushButton("Browse...")
+        browse.clicked.connect(on_browse)
+        row.addWidget(browse)
+        lay.addLayout(row)
+        return label
+
+    @staticmethod
+    def _describe_file(label: QLabel, path: str) -> None:
+        if path:
+            label.setText(os.path.basename(path))
+            label.setToolTip(path)
         else:
-            self._file_lbl.setText("Default beep")
-            self._file_lbl.setToolTip("No file chosen - the system beep is used")
+            label.setText("Default beep")
+            label.setToolTip("No file chosen - the system beep is used")
+
+    def _refresh_warn_file_label(self) -> None:
+        self._describe_file(self._warn_file_lbl, self._warn_sound_file)
+
+    def _on_browse_warn(self) -> None:
+        start = os.path.dirname(self._warn_sound_file) if self._warn_sound_file else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Choose warning sound", start,
+                                              SOUND_FILTER)
+        if path:
+            self._warn_sound_file = path
+            self._refresh_warn_file_label()
+            btn = self._mode_group.button(1)
+            if btn is not None:
+                btn.setChecked(True)
+
+    def selected_warn_sound(self) -> str:
+        return self._warn_sound_file
+
+    def _refresh_file_label(self) -> None:
+        self._describe_file(self._file_lbl, self._sound_file)
 
     def _on_browse(self) -> None:
         start = os.path.dirname(self._sound_file) if self._sound_file else ""
