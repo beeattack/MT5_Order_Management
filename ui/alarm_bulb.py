@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QRadioButton, QButtonGroup, QFileDialog, QFrame,
 )
 from PySide6.QtCore import Qt, QObject, QTimer, Signal, QRectF, QPointF
-from PySide6.QtGui import QPainter, QColor, QRadialGradient, QPen, QFont
+from PySide6.QtGui import (QPainter, QColor, QRadialGradient, QPen, QFont,
+                           QFontMetrics)
 
 from core.interval_alarm import INTERVAL_OPTIONS, DEFAULT_INTERVAL, next_due
 from utils.sound import AlarmSound, SOUND_FILTER, is_supported_sound
@@ -58,7 +59,7 @@ class AlarmEngine(QObject):
         self._ringing = False
         self._blink_on = False
         self._rang_at: datetime | None = None
-        self._shown_minutes: int | None = None   # last countdown value painted
+        self._shown_seconds: int | None = None   # last countdown value painted
         self._sound = AlarmSound()
 
         self._tick = QTimer(self)
@@ -95,21 +96,20 @@ class AlarmEngine(QObject):
     def blink_on(self) -> bool:
         return self._blink_on
 
-    def minutes_remaining(self) -> int | None:
-        """Whole minutes until the next alarm, rounded up.
+    def seconds_remaining(self) -> int | None:
+        """Whole seconds until the next alarm.
 
-        Rounded up so the bulb reads 1 for the final minute rather than
-        sitting on 0, and never shows 0 while still counting.
+        Rounded up, so the bulb shows the interval's full span on the first
+        tick (60 for a 1-minute alarm, 900 for 15 minutes) and counts down to
+        0 at the boundary. Clamped to the interval, since firing a few
+        milliseconds early would otherwise read as 901 on a 15-minute alarm.
         """
         if self._due is None or self._ringing:
             return None
         seconds = (self._due - datetime.now()).total_seconds()
         if seconds <= 0:
             return 0
-        minutes = int(seconds // 60) + (1 if seconds % 60 else 0)
-        # rounding up a hair over a whole interval (firing a few ms early)
-        # would read as 16 on a 15-minute alarm
-        return min(minutes, self._interval)
+        return min(int(seconds) + (1 if seconds % 1 else 0), self._interval * 60)
 
     def configure(self, interval: int, mode: str = MODE_BLINK,
                   sound_file: str = "", *, emit: bool = False) -> None:
@@ -139,10 +139,10 @@ class AlarmEngine(QObject):
 
     def _on_tick(self) -> None:
         now = datetime.now()
-        # repaint when the displayed minute rolls over, not every second
-        minutes = self.minutes_remaining()
-        if minutes != self._shown_minutes:
-            self._shown_minutes = minutes
+        # the countdown is in seconds now, so this repaints on every tick
+        seconds = self.seconds_remaining()
+        if seconds != self._shown_seconds:
+            self._shown_seconds = seconds
             self.state_changed.emit()
         if self._ringing:
             if self._rang_at and (now - self._rang_at).total_seconds() >= RING_SECONDS:
@@ -316,12 +316,20 @@ class AlarmBulb(QWidget):
 
         # minutes left, centred - dark on the lit face, which reads better
         # against green than white would
-        minutes = self._engine.minutes_remaining()
-        if minutes is not None:
-            text = str(minutes)
-            size = max(8, int(d * (0.70 if len(text) < 2 else 0.58)))
-            font = QFont("Segoe UI", size, QFont.Weight.Bold)
-            font.setPixelSize(size)
+        secs = self._engine.seconds_remaining()
+        if secs is not None:
+            text = str(secs)
+            # a 1-hour interval starts at 3600, so the size is fitted to the
+            # text rather than guessed from a digit count
+            font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+            size = int(d * 0.70)
+            budget = d * 0.82
+            while size > 6:
+                font.setPixelSize(size)
+                if QFontMetrics(font).horizontalAdvance(text) <= budget:
+                    break
+                size -= 1
+            font.setPixelSize(max(size, 6))
             p.setFont(font)
             # a faint light halo under the glyphs keeps them crisp over the
             # shaded sphere
