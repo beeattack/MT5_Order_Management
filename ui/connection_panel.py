@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
-from ui.alarm_bulb import AlarmBulb, AlarmEngine
+from ui.alarm_bulb import AlarmEngine, BulbWithClock
 from utils.timezone_manager import TIMEZONE_OPTIONS, DEFAULT_TZ
 
 COLORS = {
@@ -99,7 +99,9 @@ class ConnectionPanel(QWidget):
     timezone_changed     = Signal(str)   # emits IANA timezone name
 
     NORMAL_HEIGHT = 76    # two rows: status/controls + account stats
-    COMPACT_HEIGHT = 38   # single row (stats shown in the orders panel instead)
+    # single row (stats shown in the orders panel instead); tall enough for
+    # the alarm bulb and the clock beneath it
+    COMPACT_HEIGHT = 51
 
     def __init__(self, alarm: AlarmEngine, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -172,7 +174,7 @@ class ConnectionPanel(QWidget):
 
         # Interval alarm bulb, far right: green waiting, red blinking when a
         # clock boundary passes. Double-click opens its settings.
-        self._alarm_bulb = AlarmBulb(self._alarm)
+        self._alarm_bulb = BulbWithClock(self._alarm)
         top.addWidget(self._alarm_bulb)
 
         outer.addLayout(top)
@@ -193,7 +195,7 @@ class ConnectionPanel(QWidget):
         stats.addStretch()
         outer.addWidget(self._stats_widget)
 
-    def alarm_bulb(self) -> AlarmBulb:
+    def alarm_bulb(self) -> BulbWithClock:
         return self._alarm_bulb
 
     def _make_stat_block(self, key: str, attr: str) -> QHBoxLayout:

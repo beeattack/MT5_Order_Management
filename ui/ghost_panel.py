@@ -13,7 +13,7 @@ import numpy as np
 
 from core import indicators
 from models.order import Order
-from ui.alarm_bulb import AlarmBulb, AlarmEngine
+from ui.alarm_bulb import AlarmEngine, BulbWithClock
 
 COLORS = {
     "bg":        "#1a1a2e",
@@ -363,6 +363,7 @@ class GhostPanel(QWidget):
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._alarm = alarm
+        self._alarm_bulb = None
         self.setObjectName("GhostPanel")
         self.setStyleSheet(_PANEL_QSS)
         self._x_icon = _make_x_icon()
@@ -409,7 +410,8 @@ class GhostPanel(QWidget):
         if self._alarm is not None:
             # same engine as the main window's bulb, so the two never ring
             # independently or need dismissing twice
-            header.addWidget(AlarmBulb(self._alarm, size=29))
+            self._alarm_bulb = BulbWithClock(self._alarm, size=29)
+            header.addWidget(self._alarm_bulb)
 
         minimize_btn = QPushButton()
         minimize_btn.setObjectName("modeBtn")

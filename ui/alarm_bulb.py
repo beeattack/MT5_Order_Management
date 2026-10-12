@@ -339,6 +339,50 @@ class AlarmBulb(QWidget):
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
 
+class BulbWithClock(QWidget):
+    """The alarm bulb with a small clock beneath it.
+
+    The clock shows machine local time, which is also what the alarm aligns
+    its intervals to. It runs its own tick: the engine only emits while an
+    alarm is armed, and the clock has to keep running when the alarm is off.
+    """
+
+    def __init__(self, engine: AlarmEngine, size: int = 34, seconds: bool = True,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._fmt = "%H:%M:%S" if seconds else "%H:%M"
+        self._bulb = AlarmBulb(engine, size=size)
+
+        self._clock = QLabel()
+        self._clock.setObjectName("bulbClock")
+        self._clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._clock.setStyleSheet(
+            f"color: {_SUBTEXT}; font-family: Consolas, monospace;"
+            f" font-size: {10 if seconds else 9}px; font-weight: bold;"
+            f" background: transparent;"
+        )
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(1)
+        lay.addWidget(self._bulb, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(self._clock)
+
+        self._tick = QTimer(self)
+        self._tick.setInterval(1000)
+        self._tick.timeout.connect(self._refresh)
+        self._tick.start()
+        self._refresh()
+
+    def bulb(self) -> AlarmBulb:
+        return self._bulb
+
+    def _refresh(self) -> None:
+        now = datetime.now()
+        self._clock.setText(now.strftime(self._fmt))
+        self._clock.setToolTip(f"Local time  {now:%Y-%m-%d %H:%M:%S}")
+
+
 class AlarmSettingsDialog(QDialog):
     """Interval, blink/sound mode and the sound file."""
 
