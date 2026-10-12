@@ -355,8 +355,10 @@ class MainWindow(QMainWindow):
         self.alarm.configure(
             int(self.settings.get("alarm_interval_min", 0)),
             str(self.settings.get("alarm_sound_mode", MODE_BLINK)),
-            str(self.settings.get("alarm_sound_file", "")),
-            str(self.settings.get("alarm_warn_sound_file", "")),
+            # the run-up is the only sound now; prefer the file picked for it
+            # back when the alarm had one of its own
+            str(self.settings.get("alarm_warn_sound_file")
+                or self.settings.get("alarm_sound_file", "")),
         )
         saved_tz = self.settings.get("timezone")
         if saved_tz:
@@ -666,7 +668,6 @@ class MainWindow(QMainWindow):
             "alarm_interval_min": self.alarm.interval(),
             "alarm_sound_mode": self.alarm.mode(),
             "alarm_sound_file": self.alarm.sound_file(),
-            "alarm_warn_sound_file": self.alarm.warn_sound_file(),
         })
 
     def _on_watch_alert(self, symbol: str, timeframe: str, reading) -> None:
