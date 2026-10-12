@@ -682,9 +682,12 @@ class GhostPanel(QWidget):
         self._last_orders = list(orders)
         new_tickets = [o.ticket for o in orders]
         if new_tickets == self._tickets:
-            # Same orders — refresh only the live P/L; keep the close buttons
-            # intact so a click isn't interrupted by the 100ms rebuild
+            # Same tickets — refresh the live cells in place, keeping the close
+            # buttons so a click isn't interrupted by the 100ms rebuild.
+            # Volume belongs here too: a partial close shrinks it while the
+            # ticket stays, so skipping it leaves the old size on screen.
             for row, order in enumerate(orders):
+                self._set_volume(row, order)
                 self._set_pl(row, order.profit)
             self._sync_order_levels()
             return
@@ -700,11 +703,7 @@ class GhostPanel(QWidget):
             sym.setToolTip(f"{order.order_type}  {order.volume:.2f}  #{order.ticket}")
             self._table.setItem(row, 0, sym)
 
-            vol = QTableWidgetItem(f"{order.volume:.2f}")
-            vol.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            vol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._table.setItem(row, 1, vol)
-
+            self._set_volume(row, order)
             self._set_pl(row, order.profit)
 
             self._table.setCellWidget(row, 3, self._make_actions(order.ticket))
@@ -752,6 +751,15 @@ class GhostPanel(QWidget):
                 lambda _=False, t=ticket, p=pct: self.close_order_requested.emit(t, p))
             lay.addWidget(btn)
         return wrap
+
+    def _set_volume(self, row: int, order: Order) -> None:
+        vol = QTableWidgetItem(f"{order.volume:.2f}")
+        vol.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        vol.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._table.setItem(row, 1, vol)
+        sym = self._table.item(row, 0)
+        if sym is not None:     # the tooltip quotes the volume as well
+            sym.setToolTip(f"{order.order_type}  {order.volume:.2f}  #{order.ticket}")
 
     def _set_pl(self, row: int, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
