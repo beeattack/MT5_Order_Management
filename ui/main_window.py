@@ -355,10 +355,7 @@ class MainWindow(QMainWindow):
         self.alarm.configure(
             int(self.settings.get("alarm_interval_min", 0)),
             str(self.settings.get("alarm_sound_mode", MODE_BLINK)),
-            # the run-up is the only sound now; prefer the file picked for it
-            # back when the alarm had one of its own
-            str(self.settings.get("alarm_warn_sound_file")
-                or self.settings.get("alarm_sound_file", "")),
+            self._alarm_sound_setting(),
         )
         saved_tz = self.settings.get("timezone")
         if saved_tz:
@@ -662,6 +659,25 @@ class MainWindow(QMainWindow):
             self._watchlist_panel.log_message(
                 f"Refreshed {count} symbol{'s' if count != 1 else ''}{quiet}."
             )
+
+    def _alarm_sound_setting(self) -> str:
+        """The configured alarm sound, retiring the old two-file key.
+
+        When the alarm had a separate run-up sound the choice lived in
+        alarm_warn_sound_file. Reading that in preference to the current key
+        made every later pick appear not to stick, because the stale value
+        shadowed it on each launch. The current key wins; the old one is only
+        a fallback for someone who never picked again, and is deleted either
+        way so it can never shadow.
+        """
+        current = str(self.settings.get("alarm_sound_file", "") or "")
+        legacy = str(self.settings.get("alarm_warn_sound_file", "") or "")
+        chosen = current or legacy
+        if legacy:
+            self.settings.remove("alarm_warn_sound_file")
+            if chosen != current:
+                self.settings.set("alarm_sound_file", chosen)
+        return chosen
 
     def _save_alarm_settings(self) -> None:
         self.settings.update({

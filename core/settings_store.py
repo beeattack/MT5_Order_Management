@@ -36,6 +36,12 @@ class SettingsStore:
         self._data[key] = value
         self.save()
 
+    def remove(self, key: str) -> None:
+        """Drop a key for good — used to retire settings that no longer apply."""
+        if key in self._data:
+            del self._data[key]
+            self.save()
+
     def update(self, mapping: dict) -> None:
         self._data.update(mapping)
         self.save()
