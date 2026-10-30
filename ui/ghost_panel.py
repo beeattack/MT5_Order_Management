@@ -4,10 +4,11 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSlider,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSizeGrip,
-    QComboBox,
+    QComboBox, QInputDialog,
 )
 from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPointF
-from PySide6.QtGui import QFont, QColor, QIcon, QPixmap, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (QFont, QColor, QIcon, QPixmap, QPainter, QPen,
+                           QPolygonF, QFontMetrics)
 
 import numpy as np
 
@@ -30,6 +31,9 @@ COLORS = {
     "ema_14":    "#ff8c42",   # orange, solid
     "ema_20":    "#7cc4ff",   # blue, solid — cool tone, so it reads apart
     #                           from the warm pair and from the candles
+    "ema_52":    "#c792ea",   # purple, solid
+    "ema_custom": "#e8e8e8",  # near-white, dash-dot — the user's own period
+    "ema_off":   "#5a6072",   # a hidden line's legend tag
 }
 
 # Per-row close buttons: full / 50% / 80%
@@ -155,14 +159,25 @@ class MiniChart(QWidget):
     readings would otherwise be visibly wrong at the left edge.
     """
 
+    config_changed = Signal()   # a tag was toggled or its period changed
+
     MAX_BARS = 60
     # (period, colour key, pen style) — drawn longest-period first so the
     # fastest average ends up on top
-    EMA_SPECS = (
+    FIXED_EMAS = (
         (9,  "ema_9",  Qt.PenStyle.DashLine),
         (14, "ema_14", Qt.PenStyle.SolidLine),
         (20, "ema_20", Qt.PenStyle.SolidLine),
+        (52, "ema_52", Qt.PenStyle.SolidLine),
     )
+    # a fifth line whose period the user sets by double-clicking its tag
+    CUSTOM_KEY = "ema_custom"
+    CUSTOM_STYLE = Qt.PenStyle.DashDotLine
+    CUSTOM_DEFAULT = 100
+    CUSTOM_MIN, CUSTOM_MAX = 2, 250
+    # warm-up ahead of the drawn window, so a long average is converged by the
+    # first visible candle rather than dragging its seed across the chart
+    WARMUP_FACTOR = 3
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -171,7 +186,35 @@ class MiniChart(QWidget):
         self._symbol = ""
         self._digits = 5
         self._levels: dict | None = None      # entry / sl / tp of a clicked order
+        self._custom_period = self.CUSTOM_DEFAULT
+        self._hidden: set[int] = set()        # slot indices the user switched off
+        self._legend_hits: list[tuple[QRectF, int]] = []
         self.setMinimumHeight(120)
+        self.setToolTip("Click an EMA tag to hide it, double-click the last "
+                        "one to set its period")
+
+    def lines(self) -> list[tuple[int, str, Qt.PenStyle]]:
+        """Every average drawn, the user's own period last."""
+        return list(self.FIXED_EMAS) + [
+            (self._custom_period, self.CUSTOM_KEY, self.CUSTOM_STYLE)]
+
+    def bars_needed(self) -> int:
+        """Bars to fetch: the drawn window plus warm-up for the slowest line."""
+        slowest = max(period for period, _, _ in self.lines())
+        return self.MAX_BARS + slowest * self.WARMUP_FACTOR
+
+    def ema_config(self) -> dict:
+        return {"hidden": sorted(self._hidden), "custom": self._custom_period}
+
+    def set_ema_config(self, hidden=None, custom: int | None = None) -> None:
+        """Restore saved tags without re-emitting the change."""
+        if custom is not None:
+            self._custom_period = max(self.CUSTOM_MIN,
+                                      min(self.CUSTOM_MAX, int(custom)))
+        if hidden is not None:
+            count = len(self.lines())
+            self._hidden = {int(i) for i in hidden if 0 <= int(i) < count}
+        self.update()
 
     def set_levels(self, levels: dict | None) -> None:
         """Show an order's entry/SL/TP as horizontal lines, or None to clear.
@@ -204,9 +247,68 @@ class MiniChart(QWidget):
         self._bars = rows[-self.MAX_BARS:]
         self._emas = [
             [float(v) for v in indicators.ema(closes, period)[-self.MAX_BARS:]]
-            for period, _, _ in self.EMA_SPECS
+            for period, _, _ in self.lines()
         ]
         self.update()
+
+    # -- legend interaction --------------------------------------------
+
+    def _legend_slot_at(self, pos) -> int | None:
+        for rect, idx in self._legend_hits:
+            if rect.adjusted(-2, -2, 2, 2).contains(pos):
+                return idx
+        return None
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        idx = self._legend_slot_at(event.position())
+        if idx is None:
+            super().mousePressEvent(event)
+            return
+        self._hidden.symmetric_difference_update({idx})
+        self.update()
+        self.config_changed.emit()
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        idx = self._legend_slot_at(event.position())
+        if event.button() != Qt.MouseButton.LeftButton or idx is None:
+            super().mouseDoubleClickEvent(event)
+            return
+        # Qt sent a press first, which toggled this tag; undo that so a
+        # double-click only opens the editor
+        self._hidden.symmetric_difference_update({idx})
+        if idx != len(self.lines()) - 1:
+            # only the last line's period is the user's to set
+            self.update()
+            event.accept()
+            return
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle("EMA period")
+        dlg.setLabelText("Period for the last EMA line:")
+        dlg.setInputMode(QInputDialog.InputMode.IntInput)
+        dlg.setIntRange(self.CUSTOM_MIN, self.CUSTOM_MAX)
+        dlg.setIntValue(self._custom_period)
+        # QInputDialog is a native light dialog otherwise, which is jarring
+        # against the overlay
+        dlg.setStyleSheet(
+            f"QInputDialog, QDialog {{ background-color: {COLORS['bg']}; }}"
+            f"QLabel {{ color: {COLORS['text']}; font-size: 12px; }}"
+            f"QSpinBox {{ background-color: {COLORS['panel']}; color: {COLORS['text']};"
+            f" border: 1px solid {COLORS['accent']}; border-radius: 3px;"
+            f" padding: 3px 6px; font-size: 12px; }}"
+            f"QPushButton {{ background-color: {COLORS['accent']}; color: {COLORS['text']};"
+            f" border: none; border-radius: 4px; padding: 5px 14px;"
+            f" font-size: 12px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {COLORS['btn_hover']}; }}"
+        )
+        if dlg.exec() == QInputDialog.DialogCode.Accepted:
+            self._custom_period = int(dlg.intValue())
+            self.config_changed.emit()
+        self.update()
+        event.accept()
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
@@ -277,20 +379,39 @@ class MiniChart(QWidget):
             p.setPen(QPen(QColor(color), 1.2, style))
             p.drawPolyline(QPolygonF(pts))
 
-        for values, (_, key, style) in reversed(list(zip(self._emas, self.EMA_SPECS))):
-            draw_ema(values, COLORS[key], style)
+        specs = self.lines()
+        for idx, (values, (_, key, style)) in reversed(
+                list(enumerate(zip(self._emas, specs)))):
+            if idx not in self._hidden:
+                draw_ema(values, COLORS[key], style)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        # legend, top-left — the lines are otherwise easy to mix up
+        # legend, top-left. Periods only — five tags with an "EMA" apiece would
+        # not fit the overlay's width — behind one grey prefix. Each tag is a
+        # click target, so the hit rects are recorded as they are drawn.
         p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
-        lx = 5
-        for values, (period, key, _) in zip(self._emas, self.EMA_SPECS):
+        self._legend_hits = []
+        metrics = QFontMetrics(p.font())
+        lx = 5.0
+        p.setPen(QColor(COLORS["subtext"]))
+        p.drawText(QRectF(lx, pad_v - 3, 30, 12), Qt.AlignmentFlag.AlignLeft, "EMA")
+        lx += metrics.horizontalAdvance("EMA") + 5
+
+        for idx, (values, (period, key, _)) in enumerate(zip(self._emas, specs)):
             if not values:
                 continue
-            p.setPen(QColor(COLORS[key]))
-            p.drawText(QRectF(lx, pad_v - 3, 40, 12), Qt.AlignmentFlag.AlignLeft,
-                       f"EMA{period}")
-            lx += 37 if period < 10 else 43
+            text = str(period)
+            width = metrics.horizontalAdvance(text)
+            rect = QRectF(lx, pad_v - 4, width + 4, 14)
+            hidden = idx in self._hidden
+            p.setPen(QColor(COLORS["ema_off"] if hidden else COLORS[key]))
+            p.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       text)
+            if hidden:      # struck through, so "off" reads at a glance
+                sy = rect.center().y()
+                p.drawLine(int(rect.left()), int(sy), int(rect.left() + width), int(sy))
+            self._legend_hits.append((rect, idx))
+            lx += width + 7
 
         # order levels: entry / stop / target of the row the user clicked
         if self._levels:
@@ -351,6 +472,7 @@ class GhostPanel(QWidget):
     chart_toggled        = Signal(bool)   # expandable chart shown/hidden
     chart_symbol_changed = Signal(str)
     chart_timeframe_changed = Signal(str)
+    ema_config_changed = Signal()
 
     CHART_TIMEFRAMES = ("M1", "M5", "M15", "H1", "H4")
     DEFAULT_TIMEFRAME = "M15"
@@ -521,6 +643,7 @@ class GhostPanel(QWidget):
         area.addLayout(pick)
 
         self._chart = MiniChart()
+        self._chart.config_changed.connect(self.ema_config_changed)
         area.addWidget(self._chart, 1)
 
         self._chart_area.setVisible(False)
@@ -661,6 +784,15 @@ class GhostPanel(QWidget):
             self._symbol_combo.addItem(symbol)
             idx = self._symbol_combo.count() - 1
         self._symbol_combo.setCurrentIndex(idx)
+
+    def chart_bars_needed(self) -> int:
+        return self._chart.bars_needed()
+
+    def ema_config(self) -> dict:
+        return self._chart.ema_config()
+
+    def set_ema_config(self, hidden=None, custom: int | None = None) -> None:
+        self._chart.set_ema_config(hidden, custom)
 
     def set_chart_bars(self, bars, digits: int = 5) -> None:
         self._chart.set_bars(bars, self.chart_symbol(), digits)

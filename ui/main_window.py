@@ -347,6 +347,7 @@ class MainWindow(QMainWindow):
         self._ghost_panel.chart_toggled.connect(self._on_ghost_chart_toggled)
         self._ghost_panel.chart_symbol_changed.connect(self._on_ghost_chart_symbol)
         self._ghost_panel.chart_timeframe_changed.connect(self._on_ghost_chart_tf)
+        self._ghost_panel.ema_config_changed.connect(self._on_ghost_ema_config)
         self._ghost_panel.setVisible(False)
         layout.addWidget(self._ghost_panel)
 
@@ -369,6 +370,10 @@ class MainWindow(QMainWindow):
         )
         self._ghost_panel.set_chart_timeframe(
             str(self.settings.get("ghost_chart_tf", GhostPanel.DEFAULT_TIMEFRAME))
+        )
+        self._ghost_panel.set_ema_config(
+            self.settings.get("ghost_ema_hidden") or [],
+            self.settings.get("ghost_ema_custom"),
         )
         self._dashboard_panel.set_manual_thb_rate(
             float(self.settings.get("thb_manual_rate", 0.0))
@@ -896,6 +901,15 @@ class MainWindow(QMainWindow):
         self.settings.set("ghost_chart_symbol", symbol)
         self._refresh_ghost_chart()
 
+    def _on_ghost_ema_config(self) -> None:
+        cfg = self._ghost_panel.ema_config()
+        self.settings.update({
+            "ghost_ema_hidden": cfg["hidden"],
+            "ghost_ema_custom": cfg["custom"],
+        })
+        self._ghost_chart_sig = None      # the drawn lines changed: force a redraw
+        self._refresh_ghost_chart()
+
     def _on_ghost_chart_tf(self, tf: str) -> None:
         self.settings.set("ghost_chart_tf", tf)
         self._refresh_ghost_chart()
@@ -913,7 +927,9 @@ class MainWindow(QMainWindow):
             self._ghost_panel.set_chart_bars(None)
             return
         tf = self._ghost_panel.chart_timeframe()
-        bars = self.connector.copy_rates(symbol, tf, 150)
+        # enough history to warm up the slowest average the chart is drawing
+        bars = self.connector.copy_rates(symbol, tf,
+                                         self._ghost_panel.chart_bars_needed())
         if bars is None or len(bars) == 0:
             self._ghost_chart_sig = None
             self._ghost_panel.set_chart_bars(None)
