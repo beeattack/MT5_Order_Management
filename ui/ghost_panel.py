@@ -474,7 +474,7 @@ class GhostPanel(QWidget):
     chart_timeframe_changed = Signal(str)
     ema_config_changed = Signal()
 
-    CHART_TIMEFRAMES = ("M1", "M5", "M15", "H1", "H4")
+    CHART_TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4")
     DEFAULT_TIMEFRAME = "M15"
 
     CONTENT_WIDTH = 280
@@ -616,7 +616,9 @@ class GhostPanel(QWidget):
         # timeframe buttons on the left, symbol picker top-right
         pick = QHBoxLayout()
         pick.setContentsMargins(0, 0, 0, 0)
-        pick.setSpacing(3)
+        # six timeframes and the picker have to share 268px; 2px gaps buy the
+        # buttons the width their three-character labels actually need
+        pick.setSpacing(2)
 
         self._tf_group = QButtonGroup(self)
         self._tf_group.setExclusive(True)
@@ -625,7 +627,7 @@ class GhostPanel(QWidget):
             b = QPushButton(tf)
             b.setObjectName("tfBtn")
             b.setCheckable(True)
-            b.setFixedSize(26, 20)
+            b.setFixedSize(27, 20)
             b.setChecked(tf == self.DEFAULT_TIMEFRAME)
             b.setToolTip(f"Show {tf} candles")
             b.clicked.connect(lambda _=False, t=tf: self._on_timeframe_clicked(t))
@@ -636,7 +638,7 @@ class GhostPanel(QWidget):
         pick.addStretch()
         self._symbol_combo = QComboBox()
         self._symbol_combo.setObjectName("ghostSymbol")
-        self._symbol_combo.setFixedWidth(120)
+        self._symbol_combo.setFixedWidth(92)
         self._symbol_combo.setToolTip("Symbols in the MT5 Market Watch")
         self._symbol_combo.currentTextChanged.connect(self._on_symbol_changed)
         pick.addWidget(self._symbol_combo)
