@@ -191,6 +191,8 @@ class ConnectionPanel(QWidget):
         stats.addWidget(_make_divider())
         stats.addLayout(self._make_stat_block("P / L", "_pl_val"))
         stats.addWidget(_make_divider())
+        stats.addLayout(self._make_stat_block("NET", "_net_val"))
+        stats.addWidget(_make_divider())
         stats.addLayout(self._make_stat_block("BROKER", "_broker_val"))
         stats.addStretch()
         outer.addWidget(self._stats_widget)
@@ -205,11 +207,13 @@ class ConnectionPanel(QWidget):
 
         key_lbl = QLabel(key)
         key_lbl.setObjectName("statKey")
+        key_lbl.setToolTip("Net P/L of trades closed today" if key == "NET" else "")
         block.addWidget(key_lbl)
 
         val_lbl = QLabel("—")
         val_lbl.setObjectName("statValue")
-        val_lbl.setMinimumWidth(90)
+        # five blocks share the row now, so they give up some fixed width
+        val_lbl.setMinimumWidth(78)
         block.addWidget(val_lbl)
 
         setattr(self, attr, val_lbl)
@@ -307,8 +311,23 @@ class ConnectionPanel(QWidget):
             f"color: {color}; font-size: 13px; font-weight: bold; font-family: Consolas, monospace;"
         )
 
+    def set_today_net(self, net: float | None) -> None:
+        """Realized P/L of trades closed today, beside the floating figure."""
+        if net is None:
+            self._net_val.setText("—")
+            self._net_val.setStyleSheet("")
+            return
+        sign = "+" if net >= 0 else "-"
+        color = COLORS["green"] if net >= 0 else COLORS["red"]
+        self._net_val.setText(f"{sign}${abs(net):,.2f}")
+        self._net_val.setStyleSheet(
+            f"color: {color}; font-size: 13px; font-weight: bold;"
+            f" font-family: Consolas, monospace;"
+        )
+
     def _clear_stats(self) -> None:
-        for attr in ("_balance_val", "_equity_val", "_pl_val", "_broker_val"):
+        for attr in ("_balance_val", "_equity_val", "_pl_val", "_net_val",
+                     "_broker_val"):
             lbl: QLabel = getattr(self, attr)
             lbl.setText("—")
             lbl.setStyleSheet("")

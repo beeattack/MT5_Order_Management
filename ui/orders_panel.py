@@ -201,6 +201,15 @@ class OrdersPanel(QWidget):
         self._compact_pl_lbl.setVisible(False)
         header_row.addWidget(self._compact_pl_lbl)
 
+        self._compact_net_lbl = QLabel("NET  —")
+        self._compact_net_lbl.setStyleSheet(
+            f"color: {COLORS['text']}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; padding: 0 6px;"
+        )
+        self._compact_net_lbl.setToolTip("Net P/L of trades closed today")
+        self._compact_net_lbl.setVisible(False)
+        header_row.addWidget(self._compact_net_lbl)
+
         header_row.addStretch()
 
         self._close_all_btn = QPushButton("⬛  Close All Orders")
@@ -349,6 +358,7 @@ class OrdersPanel(QWidget):
         self._legend_label.setVisible(not compact)
         self._compact_equity_lbl.setVisible(compact)
         self._compact_pl_lbl.setVisible(compact)
+        self._compact_net_lbl.setVisible(compact)
         hh = self._table.horizontalHeader()
 
         # NOTE: toggle stretchLastSection BEFORE hiding/resizing columns —
@@ -378,13 +388,28 @@ class OrdersPanel(QWidget):
 
         self._rebuild_action_widgets()
 
-    def update_compact_stats(self, equity: float, pl: float) -> None:
+    def update_compact_stats(self, equity: float, pl: float,
+                             net: float | None = None) -> None:
         self._compact_equity_lbl.setText(f"EQUITY  ${equity:,.2f}")
         sign = "+" if pl >= 0 else ""
         color = COLORS["green"] if pl >= 0 else COLORS["red"]
         self._compact_pl_lbl.setText(f"P/L  {sign}${pl:,.2f}")
         self._compact_pl_lbl.setStyleSheet(
             f"color: {color}; font-size: 12px; font-weight: bold;"
+            f" font-family: Consolas, monospace; padding: 0 6px;"
+        )
+        if net is None:
+            self._compact_net_lbl.setText("NET  —")
+            self._compact_net_lbl.setStyleSheet(
+                f"color: {COLORS['text']}; font-size: 12px; font-weight: bold;"
+                f" font-family: Consolas, monospace; padding: 0 6px;"
+            )
+            return
+        nsign = "+" if net >= 0 else "-"
+        ncolor = COLORS["green"] if net >= 0 else COLORS["red"]
+        self._compact_net_lbl.setText(f"NET  {nsign}${abs(net):,.2f}")
+        self._compact_net_lbl.setStyleSheet(
+            f"color: {ncolor}; font-size: 12px; font-weight: bold;"
             f" font-family: Consolas, monospace; padding: 0 6px;"
         )
 

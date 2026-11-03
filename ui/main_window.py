@@ -523,6 +523,8 @@ class MainWindow(QMainWindow):
         self._ghost_panel.update_orders([])
         self._ghost_panel.update_account(0.0, 0.0, 0.0)
         self._ghost_panel.set_today_net(None)
+        self._conn_panel.set_today_net(None)
+        self._orders_panel.update_compact_stats(0.0, 0.0, None)
         self._ghost_net_cache = None
         self._ghost_panel.set_chart_bars(None)
         self._history_panel.clear()
@@ -859,11 +861,15 @@ class MainWindow(QMainWindow):
             profit = account_info.get("profit", 0.0)
             self._conn_panel.update_account_stats(balance, equity, profit)
             self._dashboard_panel.update_account(balance, equity, profit, len(orders))
+            # today's realized total, shown in every mode. Cached for 5s, so
+            # asking on each 100ms tick costs nothing.
+            net = self._today_realized_net()
+            self._conn_panel.set_today_net(net)
             if self._compact_mode:
-                self._orders_panel.update_compact_stats(equity, profit)
+                self._orders_panel.update_compact_stats(equity, profit, net)
             elif self._mode == "ghost":
                 self._ghost_panel.update_account(balance, equity, profit)
-                self._ghost_panel.set_today_net(self._today_realized_net())
+                self._ghost_panel.set_today_net(net)
 
     def _check_mt5_status(self) -> None:
         if self._connected:
