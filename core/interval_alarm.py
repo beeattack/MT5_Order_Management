@@ -16,6 +16,7 @@ INTERVAL_OPTIONS: tuple[tuple[int, str], ...] = (
     (15, "15 minutes"),
     (30, "30 minutes"),
     (60, "1 hour"),
+    (120, "2 hours"),
 )
 DEFAULT_INTERVAL = 0
 
