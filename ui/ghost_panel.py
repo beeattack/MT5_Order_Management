@@ -14,6 +14,7 @@ import numpy as np
 
 from core import indicators
 from models.order import Order
+from core.pip_math import pips_from_entry, format_pips
 from ui.alarm_bulb import AlarmEngine, BulbWithClock
 
 COLORS = {
@@ -477,7 +478,10 @@ class GhostPanel(QWidget):
     CHART_TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4")
     DEFAULT_TIMEFRAME = "M15"
 
-    CONTENT_WIDTH = 280
+    # 280px before the pip column. The extra 24px is what that column costs:
+    # a cell needs its text advance plus ~8px of delegate margin before the
+    # style elides it, and at 280px there was nothing left to take.
+    CONTENT_WIDTH = 304
     # Height the overlay grows by when the chart area opens
     CHART_AREA_HEIGHT = 186
 
@@ -583,10 +587,10 @@ class GhostPanel(QWidget):
 
         layout.addLayout(opacity_row)
 
-        # Four columns: BUY/SELL is carried by the symbol's colour rather than
+        # Five columns: BUY/SELL is carried by the symbol's colour rather than
         # its own column, which is the width the action buttons needed.
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["Symbol", "Vol", "P/L", ""])
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["Symbol", "Vol", "Pips", "P/L", ""])
         self._table.horizontalHeader().setVisible(False)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
@@ -601,7 +605,7 @@ class GhostPanel(QWidget):
         self._table.setFont(QFont("Consolas", 11))
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)   # Symbol
-        for col in (1, 2, 3):
+        for col in (1, 2, 3, 4):
             hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
         self._apply_column_widths()
         layout.addWidget(self._table)
@@ -822,6 +826,7 @@ class GhostPanel(QWidget):
             # ticket stays, so skipping it leaves the old size on screen.
             for row, order in enumerate(orders):
                 self._set_volume(row, order)
+                self._set_pips(row, order)
                 self._set_pl(row, order.profit)
             self._sync_order_levels()
             return
@@ -838,23 +843,33 @@ class GhostPanel(QWidget):
             self._table.setItem(row, 0, sym)
 
             self._set_volume(row, order)
+            self._set_pips(row, order)
             self._set_pl(row, order.profit)
 
-            self._table.setCellWidget(row, 3, self._make_actions(order.ticket))
+            self._table.setCellWidget(row, 4, self._make_actions(order.ticket))
 
         self._sync_order_levels()
 
     def _apply_column_widths(self) -> None:
+        """Split the 290px viewport.
+
+        Each width is the narrowest the column renders its widest real value
+        at without the delegate eliding it — found by rendering, not by font
+        metrics alone, which run ~8px short of what the item actually needs.
+        Symbol stretches into the remaining 64px, which is what a suffixed
+        symbol like AUDNZD# takes at the table's Consolas 11pt.
+        """
         self._table.horizontalHeader().setMinimumSectionSize(16)
-        self._table.setColumnWidth(1, 48)           # Volume
-        self._table.setColumnWidth(2, 76)           # P/L
-        self._table.setColumnWidth(3, _ACTIONS_W)   # close buttons
+        self._table.setColumnWidth(1, 49)           # Volume   ("12.50")
+        self._table.setColumnWidth(2, 40)           # Pips     ("+24.5" at 12px)
+        self._table.setColumnWidth(3, 77)           # P/L      ("-1,234.56" at 14px)
+        self._table.setColumnWidth(4, _ACTIONS_W)   # close buttons
 
     def _make_actions(self, ticket: int) -> QWidget:
         """Close buttons for one row: full, 50% and 80%.
 
         Labels are bare digits because the whole cluster has to live in the
-        column width the overlay can spare at 280px.
+        column width the overlay can spare at 304px.
         """
         wrap = QWidget()
         wrap.setStyleSheet("background-color: transparent;")
@@ -895,6 +910,25 @@ class GhostPanel(QWidget):
         if sym is not None:     # the tooltip quotes the volume as well
             sym.setToolTip(f"{order.order_type}  {order.volume:.2f}  #{order.ticket}")
 
+    def _set_pips(self, row: int, order: Order) -> None:
+        """Pips gained since entry, signed the same way as the row's P/L.
+
+        Rendered without a thousands separator: the column is only as wide as
+        the overlay can spare, and a four-figure pip count on gold has to fit.
+        """
+        pips = pips_from_entry(order.open_price, order.current_price,
+                               order.order_type, order.digits)
+        text = format_pips(pips).replace(",", "")
+        item = QTableWidgetItem(text)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item.setForeground(QColor(COLORS["green"] if pips >= 0 else COLORS["red"]))
+        item.setToolTip(f"{text} pips from entry {order.open_price:,.{order.digits}f}")
+        font = QFont("Consolas")
+        font.setPixelSize(12)
+        item.setFont(font)
+        self._table.setItem(row, 2, item)
+
     def _set_pl(self, row: int, profit: float) -> None:
         sign = "+" if profit >= 0 else ""
         item = QTableWidgetItem(f"{sign}{profit:,.2f}")
@@ -906,7 +940,7 @@ class GhostPanel(QWidget):
         font = QFont("Consolas")
         font.setPixelSize(14)
         item.setFont(font)
-        self._table.setItem(row, 2, item)
+        self._table.setItem(row, 3, item)
 
     def update_account(self, balance: float, equity: float, profit: float) -> None:
         sign = "+" if profit >= 0 else ""

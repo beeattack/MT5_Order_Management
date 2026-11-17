@@ -10,6 +10,7 @@ from PySide6.QtGui import QFont, QColor
 
 from models.order import Order
 from core.constants import source_icon, source_label
+from core.pip_math import pips_from_entry, format_pips, pip_size
 from core import trend_detector as td
 from utils.timezone_manager import format_dt, DEFAULT_TZ
 
@@ -28,12 +29,12 @@ COLORS = {
 }
 
 _COLUMNS = ["Ticket", "Symbol", "Trend", "Type", "Volume",
-            "Open Price", "Current", "SL", "TP", "Profit", "Open Time", "Actions"]
+            "Open Price", "Current", "SL", "TP", "Pips", "Profit", "Open Time", "Actions"]
 _COL = {name: i for i, name in enumerate(_COLUMNS)}
 
 # Numeric columns rendered right-aligned
 _RIGHT_ALIGN_COLS = frozenset(
-    _COL[n] for n in ("Volume", "Open Price", "Current", "SL", "TP", "Profit")
+    _COL[n] for n in ("Volume", "Open Price", "Current", "SL", "TP", "Pips", "Profit")
 )
 
 # Columns hidden in compact mode (Symbol, Trend, Type, Volume, Profit, Actions stay visible)
@@ -52,21 +53,23 @@ _DEFAULT_HIDDEN_COLS = frozenset(
 # headers inflate the columns and starves Actions at the 840px default window;
 # a fixed budget (~540px + stretch for Actions) keeps every column on screen.
 _NORMAL_COL_WIDTHS = {
-    "Symbol":     104,
+    "Symbol":     100,
     "Trend":       46,
     "Type":        52,
     "Volume":      62,
-    "Open Price":  92,
-    "Current":     92,
-    "Profit":      95,
+    "Open Price":   86,
+    "Current":      86,
+    "Pips":         62,
+    "Profit":       95,
 }
 
 # Fixed widths used in compact mode for visible columns
 _COMPACT_COL_WIDTHS = {
-    "Symbol":  104,   # wider to fit the source icon prefix
+    "Symbol":  100,   # wide enough for the source icon prefix
     "Trend":   48,
     "Type":    56,
-    "Volume":  68,
+    "Volume":  64,
+    "Pips":    62,
     "Profit":  95,
 }
 
@@ -266,6 +269,7 @@ class OrdersPanel(QWidget):
                 # Volume changes on a partial close even though the ticket stays
                 self._set_item(row, _COL["Volume"], f"{order.volume:.2f}")
                 self._set_item(row, _COL["Current"], f"{order.current_price:,.{order.digits}f}")
+                self._set_pips_item(row, order)
                 self._set_profit_item(row, order.profit)
                 self._set_trend_item(row, order.trend)
             self._close_all_btn.setEnabled(bool(orders))
@@ -297,6 +301,7 @@ class OrdersPanel(QWidget):
             self._set_item(row, _COL["Current"], f"{order.current_price:,.{d}f}")
             self._set_item(row, _COL["SL"], f"{order.sl:,.{d}f}" if order.sl else "—")
             self._set_item(row, _COL["TP"], f"{order.tp:,.{d}f}" if order.tp else "—")
+            self._set_pips_item(row, order)
             self._set_profit_item(row, order.profit)
             self._set_item(row, _COL["Open Time"], format_dt(order.open_time, self._tz_name))
             self._table.setCellWidget(
@@ -323,6 +328,22 @@ class OrdersPanel(QWidget):
         item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         item.setForeground(QColor(COLORS["green"] if profit >= 0 else COLORS["red"]))
         self._table.setItem(row, _COL["Profit"], item)
+
+    def _set_pips_item(self, row: int, order: Order) -> None:
+        """Distance travelled from the entry price, in pips, signed so that a
+        plus always means the position is ahead."""
+        pips = pips_from_entry(order.open_price, order.current_price,
+                               order.order_type, order.digits)
+        item = QTableWidgetItem(format_pips(pips))
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item.setForeground(QColor(COLORS["green"] if pips >= 0 else COLORS["red"]))
+        moved = abs(order.current_price - order.open_price)
+        item.setToolTip(
+            f"{format_pips(pips)} pips from entry\n"
+            f"{moved:,.{order.digits}f} price move  (1 pip = {pip_size(order.digits):.{order.digits}f})"
+        )
+        self._table.setItem(row, _COL["Pips"], item)
 
     def _set_trend_item(self, row: int, state: str) -> None:
         glyph, color, tip = _TREND_DISPLAY.get(state, _TREND_DISPLAY[td.UNKNOWN])
