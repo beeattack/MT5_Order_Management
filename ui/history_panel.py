@@ -13,6 +13,7 @@ from PySide6.QtGui import QFont, QColor, QTextCharFormat, QBrush, QPalette
 
 from models.history_entry import HistoryEntry
 from core.constants import source_icon, source_label
+from core.pip_math import pips_from_entry, format_pips, pip_size
 from utils.timezone_manager import format_dt, localize_naive, convert_dt, DEFAULT_TZ
 
 COLORS = {
@@ -30,7 +31,7 @@ COLORS = {
 }
 
 _COLUMNS = ["Ticket", "Symbol", "Type", "Exit", "Volume",
-            "Open Price", "Close Price", "Profit",
+            "Open Price", "Close Price", "Pips", "Profit",
             "Open Time", "Close Time"]
 _COL = {name: i for i, name in enumerate(_COLUMNS)}
 
@@ -370,8 +371,12 @@ class HistoryPanel(QWidget):
 
         hh = self._table.horizontalHeader()
         col_widths = {
-            "Ticket": 80, "Symbol": 90, "Type": 60, "Exit": 82, "Volume": 70,
-            "Open Price": 95, "Close Price": 95, "Profit": 90,
+            # Each width holds that column's widest real value plus the ~8px
+            # the item delegate keeps before it elides. Symbol was 90, which
+            # is 13px short of the source icon plus a suffixed symbol, so it
+            # has been rendering as an icon and an ellipsis.
+            "Ticket": 80, "Symbol": 104, "Type": 60, "Exit": 72, "Volume": 64,
+            "Open Price": 90, "Close Price": 90, "Pips": 68, "Profit": 90,
             "Open Time": 150, "Close Time": 150,
         }
         for col_idx, name in enumerate(_COLUMNS):
@@ -530,6 +535,8 @@ class HistoryPanel(QWidget):
             self._set_item(row, _COL["Close Price"], f"{entry.close_price:,.{entry.digits}f}",
                            align_right=True, sort_key=entry.close_price)
 
+            self._set_pips_item(row, entry)
+
             profit_sign  = "+" if entry.profit >= 0 else ""
             profit_item  = _SortableItem(f"{profit_sign}{entry.profit:,.2f}")
             profit_item.setFlags(_CELL_FLAGS)
@@ -575,6 +582,27 @@ class HistoryPanel(QWidget):
         if align_right:
             item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._table.setItem(row, col, item)
+
+    def _set_pips_item(self, row: int, entry: HistoryEntry) -> None:
+        """Pips the trade travelled from entry to exit, signed by direction so
+        a plus always means it closed ahead -- the same sign as its profit.
+
+        The sort key is the number, not the text, so the column orders by size
+        rather than alphabetically when its header is clicked.
+        """
+        pips = pips_from_entry(entry.open_price, entry.close_price,
+                               entry.order_type, entry.digits)
+        item = _SortableItem(format_pips(pips))
+        item.setFlags(_CELL_FLAGS)
+        item.setData(_SORT_ROLE, pips)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item.setForeground(QColor(COLORS["green"] if pips >= 0 else COLORS["red"]))
+        moved = abs(entry.close_price - entry.open_price)
+        item.setToolTip(
+            f"{format_pips(pips)} pips, entry to exit" + chr(10)
+            + f"{moved:,.{entry.digits}f} price move  (1 pip = {pip_size(entry.digits):.{entry.digits}f})"
+        )
+        self._table.setItem(row, _COL["Pips"], item)
 
     def _set_exit_item(self, row: int, reason: str) -> None:
         label, color, tip = _EXIT_DISPLAY.get(reason or "OTHER", _EXIT_DISPLAY["OTHER"])
